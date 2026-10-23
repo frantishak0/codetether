@@ -7,6 +7,8 @@ Android-клиент для [OpenCode](https://opencode.ai), работающе�
 > Неофициальный клиент. Не связан с проектом OpenCode и не поддерживается им.
 > Название и логотип OpenCode принадлежат их владельцам.
 
+**Страница загрузки:** https://frantishak0.github.io/codetether
+
 ![Экран сессий](docs/screenshots/01-sessions.png)
 
 
