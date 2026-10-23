@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CodeTether</string>
+    <string name="action_reload">Переподключиться</string>
+    <string name="action_switch">Переключить LAN / WAN</string>
+    <string name="action_settings">Настройки</string>
+    <string name="status_searching">поиск сервера…</string>
+    <string name="status_no_address">адрес не задан — открой настройки ⚙</string>
+    <string name="status_no_second">второй адрес не задан (⚙)</string>
+    <string name="status_pairing">pairing · %1$s</string>
+    <string name="status_manual">вручную · %1$s</string>
+    <string name="label_lan">LAN</string>
+    <string name="label_wan">WAN</string>
+    <string name="label_offline">офлайн</string>
+    <string name="settings_title">Настройки сервера</string>
+    <string name="hint_lan">LAN: http://192.168.1.2:49374</string>
+    <string name="hint_wan">WAN: http://100.x.y.z:49374</string>
+    <string name="hint_timeout">таймаут проверки, мс</string>
+    <string name="hint_password">пароль сервера</string>
+    <string name="save">Сохранить</string>
+    <string name="cancel">Отмена</string>
+    <string name="clear_cookies">Очистить cookie</string>
+    <string name="cookies_cleared">cookie очищены</string>
+</resources>

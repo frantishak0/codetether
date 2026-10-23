@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CodeTether</string>
+    <string name="action_reload">Reconnect</string>
+    <string name="action_switch">Switch LAN / WAN</string>
+    <string name="action_settings">Settings</string>
+    <string name="status_searching">looking for server…</string>
+    <string name="status_no_address">no address — open settings ⚙</string>
+    <string name="status_no_second">second address is not set (⚙)</string>
+    <string name="status_pairing">pairing · %1$s</string>
+    <string name="status_manual">manual · %1$s</string>
+    <string name="label_lan">LAN</string>
+    <string name="label_wan">WAN</string>
+    <string name="label_offline">offline</string>
+    <string name="settings_title">Server settings</string>
+    <string name="hint_lan">LAN: http://192.168.1.2:49374</string>
+    <string name="hint_wan">WAN: http://100.x.y.z:49374</string>
+    <string name="hint_timeout">probe timeout, ms</string>
+    <string name="hint_password">server password</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="clear_cookies">Clear cookies</string>
+    <string name="cookies_cleared">cookies cleared</string>
+</resources>
