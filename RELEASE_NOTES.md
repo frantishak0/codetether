@@ -11,6 +11,21 @@
 - Более надёжный выбор локальной сети: две попытки проверки и повторный возврат на LAN
   через 6 секунд после перехода на WAN.
 
+
+### Windows
+
+Приложение работает с сервером на любой ОС. Для Windows добавлено:
+
+- `scripts/setup-server.ps1` — аналог bash-скрипта: сам определяет порт (`28894` по умолчанию),
+  создаёт правило Windows Defender Firewall, подхватывает адрес Tailscale и печатает QR.
+- Раздел «Windows» в README: установка OpenCode из архива, настройка и отдельно — случай
+  с OpenCode внутри WSL2 (mirrored networking либо `netsh portproxy`).
+- Bash-скрипт теперь читает фактический порт сервера, а не предполагает `49374`.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-server.ps1
+```
+
 ### Быстрый старт
 
 ```bash
