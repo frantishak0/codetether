@@ -18,8 +18,8 @@ android {
         applicationId = "dev.codetether"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         resourceConfigurations += listOf("en", "ru")
     }
 
@@ -58,6 +58,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     packaging {
         resources.excludes += setOf("META-INF/*.kotlin_module", "DebugProbesKt.bin")
     }
@@ -65,4 +69,6 @@ android {
 
 dependencies {
     implementation("androidx.security:security-crypto:1.1.0")
+    implementation("androidx.core:core:1.15.0")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 }

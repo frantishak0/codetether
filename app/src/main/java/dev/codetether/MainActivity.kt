@@ -1,11 +1,13 @@
 package dev.codetether
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
@@ -16,7 +18,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.InputType
+import android.util.Base64
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -31,8 +35,13 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.zxing.integration.android.IntentIntegrator
+import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -43,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var status: TextView
     private lateinit var bar: LinearLayout
+    private lateinit var updateButton: Button
     private val io = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
     private var currentBase: String? = null
@@ -54,24 +64,11 @@ class MainActivity : Activity() {
 
     private fun lanUrl() = (prefs.getString("lan", DEFAULT_LAN) ?: "").trim().trimEnd('/')
     private fun wanUrl() = (prefs.getString("wan", "") ?: "").trim().trimEnd('/')
-    private fun timeout() = prefs.getInt("timeout", 800)
+    private fun timeout() = prefs.getInt("timeout", 1200)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        prefs = try {
-            val masterKey = MasterKey.Builder(this)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                this, "oc_secure", masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (_: Exception) {
-            // если Keystore недоступен — работаем без шифрования, но не падаем
-            getSharedPreferences("oc", Context.MODE_PRIVATE)
-        }
+        prefs = openPrefs()
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -79,7 +76,7 @@ class MainActivity : Activity() {
         }
         bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#F2F3F5"))
         }
@@ -91,6 +88,16 @@ class MainActivity : Activity() {
             maxLines = 2
         }
         bar.addView(status, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(Button(this).apply {
+            text = "📷"; contentDescription = getString(R.string.action_scan)
+            setOnClickListener { startScan() }
+        })
+        updateButton = Button(this).apply {
+            text = "⬆"; contentDescription = getString(R.string.action_update)
+            visibility = android.view.View.GONE
+            setOnClickListener { checkUpdates(manual = true) }
+        }
+        bar.addView(updateButton)
         bar.addView(Button(this).apply {
             text = "⟳"; contentDescription = getString(R.string.action_reload)
             setOnClickListener { connect(force = true) }
@@ -157,6 +164,18 @@ class MainActivity : Activity() {
         }
 
         if (!openFromIntent(intent)) connect(force = false)
+        maybeCheckUpdates()
+    }
+
+    private fun openPrefs(): SharedPreferences = try {
+        val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(
+            this, "oc_secure", masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (_: Exception) {
+        getSharedPreferences("oc", Context.MODE_PRIVATE)
     }
 
     private fun applyInsets(root: LinearLayout) {
@@ -164,7 +183,7 @@ class MainActivity : Activity() {
             window.setDecorFitsSystemWindows(false)
             root.setOnApplyWindowInsetsListener { _, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                bar.setPadding(dp(16), dp(10) + bars.top, dp(16), dp(10))
+                bar.setPadding(dp(12), dp(8) + bars.top, dp(12), dp(8))
                 web.setPadding(0, 0, 0, bars.bottom)
                 insets
             }
@@ -173,10 +192,59 @@ class MainActivity : Activity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        openFromIntent(intent)
+    // ---------------- настройка подключения ----------------
+
+    private fun applySetupPayload(text: String): Boolean {
+        val json = when {
+            text.startsWith("{") -> runCatching { JSONObject(text) }.getOrNull()
+            text.startsWith("codetether://") -> runCatching {
+                val d = Uri.parse(text).getQueryParameter("d") ?: return false
+                JSONObject(String(Base64.decode(d, Base64.URL_SAFE or Base64.NO_WRAP)))
+            }.getOrNull()
+            else -> null
+        } ?: return false
+
+        val lan = json.optString("lan").ifBlank { null }
+        val wan = json.optString("wan").ifBlank { null }
+        val pw = json.optString("password").ifBlank { null }
+        if (lan == null && wan == null) return false
+
+        prefs.edit().apply {
+            lan?.let { putString("lan", it) }
+            wan?.let { putString("wan", it) }
+            pw?.let { putString("password", it) }
+        }.apply()
+
+        suppressAuto = false
+        currentBase = null
+        ui.post {
+            Toast.makeText(this, getString(R.string.setup_applied), Toast.LENGTH_SHORT).show()
+            connect(force = true)
+        }
+        return true
+    }
+
+    private fun startScan() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQ_CAMERA)
+        } else {
+            launchScanner()
+        }
+    }
+
+    private fun launchScanner() {
+        try {
+            IntentIntegrator(this)
+                .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+                .setPrompt(getString(R.string.scan_prompt))
+                .setBeepEnabled(false)
+                .setOrientationLocked(false)
+                .initiateScan()
+        } catch (e: Exception) {
+            Toast.makeText(this, e.message ?: "scan error", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun openFromIntent(intent: Intent?): Boolean {
@@ -196,6 +264,10 @@ class MainActivity : Activity() {
             return true
         }
 
+        // QR-полезная нагрузка или codetether://setup
+        if (applySetupPayload(data)) return true
+
+        // ссылка пейринга
         val origin = runCatching {
             val u = URL(data); "${u.protocol}://${u.host}:${u.port}"
         }.getOrNull()
@@ -218,8 +290,8 @@ class MainActivity : Activity() {
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
             conn.requestMethod = "GET"
-            conn.setRequestProperty("User-Agent", "CodeTether/1.0")
-            conn.responseCode // любой ответ (200/401/403) = сервер доступен
+            conn.setRequestProperty("User-Agent", "CodeTether/${BuildConfig.VERSION_NAME}")
+            conn.responseCode
             conn.disconnect()
             true
         } catch (_: Exception) {
@@ -237,7 +309,8 @@ class MainActivity : Activity() {
         val t = timeout()
         io.execute {
             val pool = Executors.newFixedThreadPool(2)
-            val lanJob = FutureTask { probe(lan, t) }
+            // LAN: две попытки — на старте Wi-Fi/WebView первый запрос может не успеть
+            val lanJob = FutureTask { probe(lan, t) || probe(lan, t + 400) }
             val wanJob = FutureTask { probe(wan, t + 2700) }
             pool.execute(lanJob)
             pool.execute(wanJob)
@@ -260,6 +333,16 @@ class MainActivity : Activity() {
                 if (base != currentBase || force) {
                     currentBase = base
                     web.loadUrl(base)
+                }
+                // ушли на WAN — через 6 секунд проверим, не появилась ли локальная сеть
+                if (!lanOk && wanOk) {
+                    ui.postDelayed({
+                        if (currentBase == wan) {
+                            suppressAuto = false
+                            currentBase = null
+                            connect(force = true)
+                        }
+                    }, 6000)
                 }
             }
         }
@@ -290,13 +373,12 @@ class MainActivity : Activity() {
                 this.inputType = inputType
                 setSingleLine(true)
             }
+        fun label(text: String) = TextView(this).apply { this.text = text; textSize = 12f }
 
         val eLan = field(getString(R.string.hint_lan), lanUrl())
         val eWan = field(getString(R.string.hint_wan), wanUrl())
         val eTimeout = field(getString(R.string.hint_timeout), timeout().toString(), InputType.TYPE_CLASS_NUMBER)
         val ePass = field(getString(R.string.hint_password), prefs.getString("password", "") ?: "")
-
-        fun label(text: String) = TextView(this).apply { this.text = text; textSize = 12f }
 
         box.addView(label(getString(R.string.label_lan)))
         box.addView(eLan)
@@ -314,19 +396,130 @@ class MainActivity : Activity() {
                 prefs.edit()
                     .putString("lan", eLan.text.toString().trim())
                     .putString("wan", eWan.text.toString().trim())
-                    .putInt("timeout", eTimeout.text.toString().toIntOrNull() ?: 800)
+                    .putInt("timeout", eTimeout.text.toString().toIntOrNull() ?: 1200)
                     .putString("password", ePass.text.toString().trim())
                     .apply()
                 currentBase = null
                 connect(force = true)
             }
-            .setNeutralButton(getString(R.string.clear_cookies)) { _: DialogInterface, _: Int ->
-                CookieManager.getInstance().removeAllCookies(null)
-                CookieManager.getInstance().flush()
-                status.text = getString(R.string.cookies_cleared)
-            }
+            .setNeutralButton(getString(R.string.scan_qr)) { _: DialogInterface, _: Int -> startScan() }
             .setNegativeButton(getString(R.string.cancel), null)
             .show()
+    }
+
+    // ---------------- автообновление ----------------
+
+    private fun maybeCheckUpdates() {
+        val last = prefs.getLong("lastUpdateCheck", 0L)
+        if (System.currentTimeMillis() - last < 24 * 3600 * 1000L) {
+            if (prefs.getBoolean("updateAvailable", false)) updateButton.visibility = android.view.View.VISIBLE
+            return
+        }
+        checkUpdates(manual = false)
+    }
+
+    private fun checkUpdates(manual: Boolean) {
+        io.execute {
+            val info = runCatching {
+                val conn = URL("$REPO_API/releases/latest").openConnection() as HttpURLConnection
+                conn.connectTimeout = 4000
+                conn.readTimeout = 6000
+                conn.setRequestProperty("Accept", "application/vnd.github+json")
+                conn.setRequestProperty("User-Agent", "CodeTether")
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+                val o = JSONObject(body)
+                val tag = o.optString("tag_name").removePrefix("v")
+                val apk = o.optJSONArray("assets")?.let { arr ->
+                    (0 until arr.length())
+                        .map { arr.getJSONObject(it) }
+                        .firstOrNull { it.optString("name").endsWith(".apk") }
+                        ?.optString("browser_download_url")
+                }
+                Triple(tag, apk, o.optString("html_url"))
+            }.getOrNull()
+
+            ui.post {
+                prefs.edit().putLong("lastUpdateCheck", System.currentTimeMillis()).apply()
+                if (info == null) {
+                    if (manual) Toast.makeText(this, getString(R.string.update_check_failed), Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                val (tag, apk, page) = info
+                val newer = tag.isNotBlank() && apk != null && isNewer(tag, BuildConfig.VERSION_NAME)
+                prefs.edit().putBoolean("updateAvailable", newer).apply()
+                updateButton.visibility = if (newer) android.view.View.VISIBLE else android.view.View.GONE
+                when {
+                    newer -> AlertDialog.Builder(this)
+                        .setTitle(getString(R.string.update_title, tag))
+                        .setMessage(getString(R.string.update_message, BuildConfig.VERSION_NAME, tag))
+                        .setPositiveButton(getString(R.string.update_install)) { _: DialogInterface, _: Int -> downloadAndInstall(apk!!) }
+                        .setNegativeButton(getString(R.string.cancel), null)
+                        .show()
+
+                    manual -> Toast.makeText(this, getString(R.string.update_none), Toast.LENGTH_SHORT).show()
+                    else -> Unit
+                }
+            }
+        }
+    }
+
+    private fun isNewer(remote: String, current: String): Boolean {
+        fun parts(v: String) = v.split(".", "-").mapNotNull { it.toIntOrNull() }
+        val a = parts(remote)
+        val b = parts(current)
+        for (i in 0 until maxOf(a.size, b.size)) {
+            val x = a.getOrElse(i) { 0 }
+            val y = b.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        return false
+    }
+
+    private fun downloadAndInstall(url: String) {
+        Toast.makeText(this, getString(R.string.update_downloading), Toast.LENGTH_SHORT).show()
+        io.execute {
+            val ok = runCatching {
+                val out = File(cacheDir, "codetether-update.apk")
+                URL(url).openStream().use { input -> out.outputStream().use { input.copyTo(it) } }
+                out
+            }.getOrNull()
+            ui.post {
+                if (ok == null) {
+                    Toast.makeText(this, getString(R.string.update_check_failed), Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                installApk(ok)
+            }
+        }
+    }
+
+    private fun installApk(file: File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_title_perm))
+                .setMessage(getString(R.string.update_message_perm))
+                .setPositiveButton(getString(R.string.update_open_settings)) { _: DialogInterface, _: Int ->
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton(getString(R.string.cancel), null)
+                .show()
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        startActivity(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        )
+    }
+
+    // ---------------- жизненный цикл ----------------
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openFromIntent(intent)
     }
 
     @Deprecated("Deprecated in Java")
@@ -339,8 +532,24 @@ class MainActivity : Activity() {
         if (requestCode == FILE_CHOOSER_REQUEST) {
             filePathCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
             filePathCallback = null
-        } else {
-            @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
+        if (scan != null) {
+            val text = scan.contents
+            if (!text.isNullOrBlank() && !applySetupPayload(text)) {
+                Toast.makeText(this, getString(R.string.scan_unknown), Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+        @Suppress("DEPRECATION") super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_CAMERA) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) launchScanner()
+            else Toast.makeText(this, getString(R.string.scan_no_permission), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -360,6 +569,8 @@ class MainActivity : Activity() {
 
     companion object {
         private const val FILE_CHOOSER_REQUEST = 1001
+        private const val REQ_CAMERA = 1002
         private const val DEFAULT_LAN = "http://192.168.1.2:49374"
+        private const val REPO_API = "https://api.github.com/repos/frantishak0/codetether"
     }
 }

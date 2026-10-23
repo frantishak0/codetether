@@ -21,4 +21,20 @@
     <string name="cancel">Отмена</string>
     <string name="clear_cookies">Очистить cookie</string>
     <string name="cookies_cleared">cookie очищены</string>
+    <string name="action_scan">Сканировать QR</string>
+    <string name="action_update">Доступно обновление</string>
+    <string name="scan_qr">Сканировать QR</string>
+    <string name="scan_prompt">Наведите камеру на QR из скрипта настройки сервера</string>
+    <string name="scan_unknown">Это не код настройки CodeTether</string>
+    <string name="scan_no_permission">Для сканирования нужен доступ к камере</string>
+    <string name="setup_applied">Настройки сервера применены</string>
+    <string name="update_title">Доступен CodeTether %1$s</string>
+    <string name="update_message">Установлено: %1$s\nНовое: %2$s</string>
+    <string name="update_install">Скачать и установить</string>
+    <string name="update_downloading">Загрузка обновления…</string>
+    <string name="update_check_failed">Не удалось проверить обновления</string>
+    <string name="update_none">Установлена последняя версия</string>
+    <string name="update_title_perm">Нужно разрешение</string>
+    <string name="update_message_perm">Разрешите установку приложений из CodeTether и нажмите кнопку обновления снова.</string>
+    <string name="update_open_settings">Открыть настройки</string>
 </resources>

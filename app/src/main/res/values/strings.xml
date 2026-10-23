@@ -21,4 +21,20 @@
     <string name="cancel">Cancel</string>
     <string name="clear_cookies">Clear cookies</string>
     <string name="cookies_cleared">cookies cleared</string>
+    <string name="action_scan">Scan QR</string>
+    <string name="action_update">Update available</string>
+    <string name="scan_qr">Scan QR</string>
+    <string name="scan_prompt">Point the camera at the QR from the server setup script</string>
+    <string name="scan_unknown">This QR is not a CodeTether setup code</string>
+    <string name="scan_no_permission">Camera permission is required to scan</string>
+    <string name="setup_applied">Server settings applied</string>
+    <string name="update_title">CodeTether %1$s is available</string>
+    <string name="update_message">Installed: %1$s\nNew: %2$s</string>
+    <string name="update_install">Download and install</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_check_failed">Could not check for updates</string>
+    <string name="update_none">You have the latest version</string>
+    <string name="update_title_perm">Permission required</string>
+    <string name="update_message_perm">Allow installing apps from CodeTether, then tap the update button again.</string>
+    <string name="update_open_settings">Open settings</string>
 </resources>
