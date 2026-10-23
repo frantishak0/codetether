@@ -13,7 +13,7 @@
 
 set -uo pipefail
 
-PORT=49374
+PORT=49374   # значение по умолчанию, ниже переопределяется фактическим
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; OFF=$'\033[0m'
 
 say()  { printf '%s\n' "$*"; }
@@ -47,6 +47,13 @@ else
   sleep 1
   ok "сервер переключён на 0.0.0.0:$PORT"
 fi
+
+# ---------- 3b. фактический порт сервера ----------
+DETECTED="$(opencode service status 2>/dev/null | head -1 | grep -oE ':[0-9]+' | head -1 | tr -d ':')"
+if [ -n "${DETECTED:-}" ]; then
+  PORT="$DETECTED"
+fi
+ok "порт сервера: $PORT"
 
 # ---------- 4. локальный адрес и файрвол ----------
 CIDR="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | grep -vE '^100\.' | head -1)"

@@ -80,6 +80,60 @@ sudo ufw allow in on tailscale0
 tailscale ip -4          # этот адрес указывается как WAN
 ```
 
+
+## Windows
+
+Приложение не зависит от ОС сервера — на Windows всё работает так же. Отличия:
+
+| | Linux | Windows |
+|---|---|---|
+| Порт сервера по умолчанию | `49374` | `28894` |
+| Файрвол | `ufw` | Windows Defender Firewall |
+| Скрипт настройки | `scripts/setup-server.sh` | `scripts/setup-server.ps1` |
+
+**Установка OpenCode** — пакетные менеджеры Windows не поддерживаются, берите готовый архив:
+[opencode-windows-x64.zip](https://opencode.ai/update/api/latest/cli/opencode/opencode-windows-x64.zip)
+(или `npm install -g @opencode/cli`, если установлен Node.js).
+
+**Настройка сервера и QR:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-server.ps1
+```
+
+Скрипт сам определит порт, создаст правило файрвола (нужны права администратора)
+и напечатает QR. QR рисуется через Node.js (`npm`), если он установлен; иначе будет
+выведена ссылка `codetether://setup?d=…`.
+
+### OpenCode внутри WSL2
+
+WSL2 сидит за NAT, поэтому телефон не увидит сервер напрямую. Два пути:
+
+**1. Mirrored networking** (Windows 11 22H2+) — в `%UserProfile%\.wslconfig`:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+**2. Проброс порта** (Windows 10/11), в PowerShell от администратора:
+
+```powershell
+$wslIp = (wsl hostname -I).Trim().Split()[0]
+netsh interface portproxy add v4tov4 listenport=49374 listenaddress=0.0.0.0 `
+  connectport=49374 connectaddress=$wslIp
+New-NetFirewallRule -DisplayName 'CodeTether WSL' -Direction Inbound -Action Allow `
+  -Protocol TCP -LocalPort 49374 -Profile Private
+```
+
+Внутри WSL запустите bash-версию скрипта:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/frantishak0/codetether/main/scripts/setup-server.sh | bash
+```
+
+> Адрес WSL меняется после перезагрузки — при необходимости обновите правило `portproxy`.
+
 ## Настройка приложения
 
 Кнопка **⚙** — адреса и пароль:
