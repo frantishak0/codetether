@@ -28,7 +28,7 @@ jobs:
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.jks
           fi
-          gradle --no-daemon assembleRelease bundleRelease
+          ./gradlew --no-daemon assembleRelease bundleRelease
 
       - name: Upload artifacts
         uses: softprops/action-gh-release@v2
