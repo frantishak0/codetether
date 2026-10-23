@@ -58,6 +58,7 @@ class MainActivity : Activity() {
     private var currentBase: String? = null
     private var probing = false
     private var suppressAuto = false
+    private var recheckScheduled = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var cm: ConnectivityManager
     private lateinit var prefs: SharedPreferences
@@ -100,7 +101,7 @@ class MainActivity : Activity() {
         bar.addView(updateButton)
         bar.addView(Button(this).apply {
             text = "⟳"; contentDescription = getString(R.string.action_reload)
-            setOnClickListener { connect(force = true) }
+            setOnClickListener { connect(force = true, reload = true) }
         })
         bar.addView(Button(this).apply {
             text = "⇄"; contentDescription = getString(R.string.action_switch)
@@ -299,7 +300,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun connect(force: Boolean) {
+    private fun connect(force: Boolean, reload: Boolean = force) {
         if (force) suppressAuto = false
         if (suppressAuto && !force) return
         if (probing) return
@@ -330,19 +331,22 @@ class MainActivity : Activity() {
                     return@post
                 }
                 status.text = "$label · $base"
-                if (base != currentBase || force) {
+                // перезагружаем страницу только если адрес изменился (или это ручное ⟳)
+                if (base != currentBase || reload) {
                     currentBase = base
                     web.loadUrl(base)
                 }
-                // ушли на WAN — через 6 секунд проверим, не появилась ли локальная сеть
-                if (!lanOk && wanOk) {
+                // ушли на WAN — изредка проверяем, не вернулась ли локальная сеть,
+                // но страницу при этом не перезагружаем
+                if (!lanOk && wanOk && !recheckScheduled) {
+                    recheckScheduled = true
                     ui.postDelayed({
+                        recheckScheduled = false
                         if (currentBase == wan) {
                             suppressAuto = false
-                            currentBase = null
-                            connect(force = true)
+                            connect(force = true, reload = false)
                         }
-                    }, 6000)
+                    }, 60000)
                 }
             }
         }
