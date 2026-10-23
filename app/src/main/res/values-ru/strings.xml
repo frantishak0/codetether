@@ -37,4 +37,6 @@
     <string name="update_title_perm">Нужно разрешение</string>
     <string name="update_message_perm">Разрешите установку приложений из CodeTether и нажмите кнопку обновления снова.</string>
     <string name="update_open_settings">Открыть настройки</string>
+    <string name="more">Ещё</string>
+    <string name="check_updates">Проверить обновления</string>
 </resources>

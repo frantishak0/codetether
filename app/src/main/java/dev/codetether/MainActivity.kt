@@ -406,7 +406,30 @@ class MainActivity : Activity() {
                 currentBase = null
                 connect(force = true)
             }
-            .setNeutralButton(getString(R.string.scan_qr)) { _: DialogInterface, _: Int -> startScan() }
+            .setNeutralButton(getString(R.string.more)) { _: DialogInterface, _: Int -> showMoreMenu() }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
+    }
+
+    private fun showMoreMenu() {
+        val items = arrayOf(
+            getString(R.string.scan_qr),
+            getString(R.string.check_updates),
+            getString(R.string.clear_cookies)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.more))
+            .setItems(items) { _: DialogInterface, which: Int ->
+                when (which) {
+                    0 -> startScan()
+                    1 -> checkUpdates(manual = true)
+                    2 -> {
+                        CookieManager.getInstance().removeAllCookies(null)
+                        CookieManager.getInstance().flush()
+                        status.text = getString(R.string.cookies_cleared)
+                    }
+                }
+            }
             .setNegativeButton(getString(R.string.cancel), null)
             .show()
     }

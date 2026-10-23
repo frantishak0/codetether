@@ -37,4 +37,6 @@
     <string name="update_title_perm">Permission required</string>
     <string name="update_message_perm">Allow installing apps from CodeTether, then tap the update button again.</string>
     <string name="update_open_settings">Open settings</string>
+    <string name="more">More</string>
+    <string name="check_updates">Check for updates</string>
 </resources>
