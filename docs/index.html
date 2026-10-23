@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeTether — Android-клиент для OpenCode</title>
+<meta name="description" content="Клиент OpenCode для Android: работа в локальной сети и через интернет (Tailscale) с автоматическим переключением. Подключение одним сканированием QR.">
+<link rel="icon" href="icon-512.png">
+<style>
+  :root{
+    --bg:#0b1220; --bg-soft:#111a2e; --card:#151f36; --line:#233256;
+    --fg:#eaeefb; --muted:#9fb0d0; --accent:#4ade80; --brand:#1f6feb; --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%, #17305e 0%, var(--bg) 60%) no-repeat, var(--bg);
+    color:var(--fg); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px; margin:0 auto; padding:0 20px}
+  header{padding:56px 0 24px; text-align:center}
+  .logo{width:96px;height:96px;border-radius:24px;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+  h1{font-size:clamp(30px,6vw,46px); margin:20px 0 8px; letter-spacing:-.02em}
+  .tag{color:var(--muted); font-size:clamp(16px,2.4vw,19px); margin:0 auto; max-width:640px}
+  .badges{margin-top:16px; color:var(--muted); font-size:14px}
+  .badges span{display:inline-block; margin:0 6px}
+  .cta{margin:32px 0 8px}
+  .btn{
+    display:inline-flex; align-items:center; gap:10px; background:var(--brand); color:#fff;
+    font-weight:600; font-size:18px; padding:15px 28px; border-radius:999px;
+    box-shadow:0 10px 26px rgba(31,111,235,.35); transition:transform .12s ease, box-shadow .12s ease;
+  }
+  .btn:hover{transform:translateY(-2px); text-decoration:none; box-shadow:0 14px 30px rgba(31,111,235,.45)}
+  .small{color:var(--muted); font-size:14px; margin-top:12px}
+  section{padding:40px 0}
+  h2{font-size:clamp(22px,3.4vw,28px); margin:0 0 18px; letter-spacing:-.01em}
+  .grid{display:grid; gap:18px}
+  .cols-3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .cols-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:linear-gradient(180deg,var(--card),var(--bg-soft)); border:1px solid var(--line); border-radius:var(--radius); padding:20px}
+  .card h3{margin:0 0 8px; font-size:17px}
+  .card p{margin:0; color:var(--muted); font-size:15px}
+  .step{display:flex; gap:14px; align-items:flex-start}
+  .num{flex:0 0 32px; height:32px; border-radius:50%; background:var(--brand); color:#fff; display:grid; place-items:center; font-weight:700; font-size:15px}
+  pre{
+    background:#0d1526; border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+    overflow-x:auto; font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#cfe3ff;
+  }
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:14px}
+  .shot{width:100%; border-radius:14px; border:1px solid var(--line); background:#fff}
+  .shots{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px}
+  .qr{display:grid; place-items:center; text-align:center}
+  .qr img{width:220px; height:220px; background:#fff; padding:10px; border-radius:16px}
+  table{width:100%; border-collapse:collapse; font-size:15px}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line)}
+  th{color:var(--muted); font-weight:600}
+  footer{padding:40px 0 60px; color:var(--muted); font-size:14px; text-align:center; border-top:1px solid var(--line); margin-top:20px}
+  .note{background:#16223c; border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:10px; padding:14px 16px; color:var(--muted); font-size:14.5px}
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <img class="logo" src="icon-512.png" alt="CodeTether">
+  <h1>CodeTether</h1>
+  <p class="tag">Android-клиент для <a href="https://opencode.ai">OpenCode</a>, работающего на вашем компьютере.
+     Локальная сеть и интернет через Tailscale — с автоматическим переключением.</p>
+  <div class="badges">
+    <span>Android 8.0+</span>·<span>302 КБ</span>·<span>без рекламы и аналитики</span>·<span>MIT</span>
+  </div>
+  <div class="cta">
+    <a class="btn" href="https://github.com/frantishak0/codetether/releases/latest/download/CodeTether-latest.apk">⬇ Скачать APK</a>
+  </div>
+  <p class="small">Файл подписан: <code>CN=CodeTether</code> · <a href="https://github.com/frantishak0/codetether/releases/latest">все релизы</a></p>
+</header>
+
+<section class="wrap">
+  <div class="grid cols-2" style="align-items:center">
+    <div>
+      <h2>Установка за две минуты</h2>
+      <div class="grid" style="gap:16px">
+        <div class="step"><div class="num">1</div><div>
+          <strong>На компьютере</strong> — одна команда настраивает сервер и печатает QR.
+          <pre>curl -fsSL https://raw.githubusercontent.com/frantishak0/codetether/main/scripts/setup-server.sh | bash</pre>
+          <span class="small">Windows: <code>powershell -ExecutionPolicy Bypass -File .\scripts\setup-server.ps1</code></span>
+        </div></div>
+        <div class="step"><div class="num">2</div><div>
+          <strong>На телефоне</strong> — установите APK и нажмите <strong>📷</strong>, наведите камеру на QR.
+          Адреса LAN/WAN и пароль подставятся сами.
+        </div></div>
+        <div class="step"><div class="num">3</div><div>
+          <strong>Готово</strong> — дома приложение идёт напрямую по Wi-Fi, вне дома автоматически
+          переключается на Tailscale.
+        </div></div>
+      </div>
+    </div>
+    <div class="card qr">
+      <img src="qr-apk.png" alt="QR: скачать APK">
+      <p class="small" style="margin-top:12px">Наведите камеру телефона, чтобы скачать APK</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Возможности</h2>
+  <div class="grid cols-3">
+    <div class="card"><h3>Авто-переключение</h3><p>Параллельная проверка обоих адресов: локальная сеть в приоритете, при её потере — мгновенный уход на Tailscale.</p></div>
+    <div class="card"><h3>Подключение по QR</h3><p>Скрипт настройки печатает код с адресами и паролем. Одно сканирование — и всё готово.</p></div>
+    <div class="card"><h3>Автообновление</h3><p>Приложение само проверяет новые релизы и предлагает обновиться.</p></div>
+    <div class="card"><h3>Полный веб-интерфейс</h3><p>Все сессии, проекты и инструменты OpenCode — как в браузере, но в удобном приложении.</p></div>
+    <div class="card"><h3>Загрузка файлов</h3><p>Прикрепляйте файлы к сообщениям прямо из системы Android.</p></div>
+    <div class="card"><h3>Ничего лишнего</h3><p>Без аналитики и рекламы. Пароль хранится в EncryptedSharedPreferences, соединения идут только к вашему серверу.</p></div>
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Как это работает</h2>
+  <pre>[Android]  ──LAN──────▶  http://192.168.x.x:49374
+     │                            │
+     └────Tailscale──▶  http://100.x.y.z:49374
+                                  ▼
+                        opencode serve (ваш компьютер)</pre>
+  <table>
+    <tr><th>Платформа сервера</th><th>Порт по умолчанию</th><th>Скрипт настройки</th></tr>
+    <tr><td>Linux / macOS</td><td>49374</td><td><code>setup-server.sh</code></td></tr>
+    <tr><td>Windows</td><td>28894</td><td><code>setup-server.ps1</code></td></tr>
+    <tr><td>WSL2</td><td>49374</td><td>bash-скрипт + portproxy / mirrored networking</td></tr>
+  </table>
+  <p class="note" style="margin-top:18px">OpenCode внутри WSL2 сидит за NAT — телефон его не увидит напрямую.
+     Включите <code>networkingMode=mirrored</code> в <code>.wslconfig</code> или пробросьте порт через
+     <code>netsh interface portproxy</code>. Подробности — в
+     <a href="https://github.com/frantishak0/codetether#windows">README</a>.</p>
+</section>
+
+<section class="wrap">
+  <h2>Скриншоты</h2>
+  <div class="shots">
+    <img class="shot" src="screenshots/01-sessions.png" alt="Список сессий">
+    <img class="shot" src="screenshots/02-wan-fallback.png" alt="Работа через Tailscale">
+  </div>
+</section>
+
+<section class="wrap">
+  <h2>Ссылки</h2>
+  <div class="grid cols-3">
+    <div class="card"><h3><a href="https://github.com/frantishak0/codetether">Исходный код</a></h3><p>Kotlin, WebView-клиент. Сборка: <code>./gradlew assembleRelease</code></p></div>
+    <div class="card"><h3><a href="https://github.com/frantishak0/codetether#readme">Документация</a></h3><p>Установка сервера, Tailscale, Windows и WSL2.</p></div>
+    <div class="card"><h3><a href="https://github.com/frantishak0/codetether/blob/main/PRIVACY.md">Конфиденциальность</a></h3><p>Данные не покидают ваши устройства. Лицензия MIT.</p></div>
+  </div>
+</section>
+
+<footer class="wrap">
+  CodeTether — неофициальный клиент. Не связан с проектом OpenCode и не поддерживается им.<br>
+  OpenCode — торговая марка соответствующего проекта.
+</footer>
+
+</body>
+</html>
