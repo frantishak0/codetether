@@ -284,19 +284,31 @@ class MainActivity : Activity() {
         return true
     }
 
-    private fun probe(base: String?, timeoutMs: Int): Boolean {
-        if (base.isNullOrBlank()) return false
+    /** Проверяет доступность сервера. Возвращает пару: доступен ли, версия сервера (если отдал). */
+    private fun probeInfo(base: String?, timeoutMs: Int): Pair<Boolean, String?> {
+        if (base.isNullOrBlank()) return false to null
+        val pw = prefs.getString("password", "") ?: ""
         return try {
             val conn = URL("$base/api/info").openConnection() as HttpURLConnection
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
             conn.requestMethod = "GET"
             conn.setRequestProperty("User-Agent", "CodeTether/${BuildConfig.VERSION_NAME}")
-            conn.responseCode
+            if (pw.isNotBlank()) {
+                val token = Base64.encodeToString("opencode:$pw".toByteArray(), Base64.NO_WRAP)
+                conn.setRequestProperty("Authorization", "Basic $token")
+            }
+            val code = conn.responseCode
+            val version = if (code == 200) {
+                runCatching {
+                    JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                        .optString("version").ifBlank { null }
+                }.getOrNull()
+            } else null
             conn.disconnect()
-            true
+            (code in 200..499) to version
         } catch (_: Exception) {
-            false
+            false to null
         }
     }
 
@@ -311,14 +323,18 @@ class MainActivity : Activity() {
         io.execute {
             val pool = Executors.newFixedThreadPool(2)
             // LAN: две попытки — на старте Wi-Fi/WebView первый запрос может не успеть
-            val lanJob = FutureTask { probe(lan, t) || probe(lan, t + 400) }
-            val wanJob = FutureTask { probe(wan, t + 2700) }
+            val lanJob = FutureTask { probeWithRetry(lan, t) }
+            val wanJob = FutureTask { probeInfo(wan, t + 2700) }
             pool.execute(lanJob)
             pool.execute(wanJob)
-            val lanOk = runCatching { lanJob.get() }.getOrDefault(false)
-            val wanOk = if (lanOk) false else runCatching { wanJob.get() }.getOrDefault(false)
+            val lanRes = runCatching { lanJob.get() }.getOrDefault(false to null)
+            val wanRes = if (lanRes.first) false to null
+                         else runCatching { wanJob.get() }.getOrDefault(false to null)
             pool.shutdown()
+            val lanOk = lanRes.first
+            val wanOk = wanRes.first
             val base = if (lanOk) lan else if (wanOk) wan else lan
+            val serverVersion = if (lanOk) lanRes.second else if (wanOk) wanRes.second else null
             val label = when {
                 lanOk -> getString(R.string.label_lan)
                 wanOk -> getString(R.string.label_wan)
@@ -331,6 +347,20 @@ class MainActivity : Activity() {
                     return@post
                 }
                 status.text = "$label · $base"
+
+                // сервер обновился — в кэше WebView остались старые (уже не существующие) файлы
+                val known = prefs.getString("serverVersion", null)
+                if (!serverVersion.isNullOrBlank() && (known == null || known != serverVersion)) {
+                    prefs.edit().putString("serverVersion", serverVersion).apply()
+                    web.clearCache(true)
+                    if (known != null) {
+                        status.text = getString(R.string.status_cache_reset, label, base, serverVersion)
+                    }
+                    currentBase = base
+                    web.loadUrl(base)
+                    return@post
+                }
+
                 // перезагружаем страницу только если адрес изменился (или это ручное ⟳)
                 if (base != currentBase || reload) {
                     currentBase = base
@@ -350,6 +380,12 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    private fun probeWithRetry(base: String?, t: Int): Pair<Boolean, String?> {
+        val first = probeInfo(base, t)
+        if (first.first) return first
+        return probeInfo(base, t + 400)
     }
 
     private fun toggle() {
@@ -415,6 +451,7 @@ class MainActivity : Activity() {
         val items = arrayOf(
             getString(R.string.scan_qr),
             getString(R.string.check_updates),
+            getString(R.string.clear_cache),
             getString(R.string.clear_cookies)
         )
         AlertDialog.Builder(this)
@@ -424,6 +461,12 @@ class MainActivity : Activity() {
                     0 -> startScan()
                     1 -> checkUpdates(manual = true)
                     2 -> {
+                        web.clearCache(true)
+                        status.text = getString(R.string.cache_cleared)
+                        currentBase = null
+                        connect(force = true, reload = true)
+                    }
+                    3 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
                         status.text = getString(R.string.cookies_cleared)

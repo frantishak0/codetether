@@ -39,4 +39,7 @@
     <string name="update_open_settings">Открыть настройки</string>
     <string name="more">Ещё</string>
     <string name="check_updates">Проверить обновления</string>
+    <string name="clear_cache">Очистить кэш</string>
+    <string name="cache_cleared">кэш очищен</string>
+    <string name="status_cache_reset">%1$s · %2$s · сервер обновлён до %3$s, кэш сброшен</string>
 </resources>

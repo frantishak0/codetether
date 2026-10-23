@@ -39,4 +39,7 @@
     <string name="update_open_settings">Open settings</string>
     <string name="more">More</string>
     <string name="check_updates">Check for updates</string>
+    <string name="clear_cache">Clear cache</string>
+    <string name="cache_cleared">cache cleared</string>
+    <string name="status_cache_reset">%1$s · %2$s · server updated to %3$s, cache reset</string>
 </resources>
