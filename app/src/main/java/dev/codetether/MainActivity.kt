@@ -346,23 +346,49 @@ class MainActivity : Activity() {
         val wan = wanUrl()
         val t = timeout()
         io.execute {
-            val pool = Executors.newFixedThreadPool(2)
-            // LAN: две попытки — на старте Wi-Fi/WebView первый запрос может не успеть
-            val lanJob = FutureTask { probeWithRetry(lan, t) }
-            val wanJob = FutureTask { probeInfo(wan, t + 2700) }
-            pool.execute(lanJob)
-            pool.execute(wanJob)
-            val lanRes = runCatching { lanJob.get() }.getOrDefault(false to null)
-            val wanRes = if (lanRes.first) false to null
-                         else runCatching { wanJob.get() }.getOrDefault(false to null)
-            pool.shutdown()
-            val lanOk = lanRes.first
-            val wanOk = wanRes.first
-            val base = if (lanOk) lan else if (wanOk) wan else lan
-            val serverVersion = if (lanOk) lanRes.second else if (wanOk) wanRes.second else null
+            var chosen: String? = null
+            var serverVersion: String? = null
+            val cur = currentBase
+
+            // 1. если уже подключены — проверяем ТОЛЬКО текущий адрес и никуда не прыгаем
+            if (cur != null) {
+                val r = probeWithRetry(cur, t)
+                if (r.first) {
+                    chosen = cur
+                    serverVersion = r.second
+                }
+            }
+
+            // 2. если текущий недоступен (или ещё не выбрано) — ищем рабочий
+            if (chosen == null) {
+                val lanRes = probeWithRetry(lan, t)
+                if (lanRes.first) {
+                    chosen = lan
+                    serverVersion = lanRes.second
+                } else {
+                    val wanRes = probeInfo(wan, t + 2700)
+                    if (wanRes.first) {
+                        chosen = wan
+                        serverVersion = wanRes.second
+                    } else {
+                        chosen = lan
+                    }
+                }
+            }
+
+            // 3. сидим на WAN — раз в минуту пробуем вернуться в локальную сеть
+            if (chosen == wan && lan.isNotBlank()) {
+                val lanRes = probeInfo(lan, t)
+                if (lanRes.first) {
+                    chosen = lan
+                    serverVersion = lanRes.second ?: serverVersion
+                }
+            }
+
+            val base = chosen
             val label = when {
-                lanOk -> getString(R.string.label_lan)
-                wanOk -> getString(R.string.label_wan)
+                base == lan -> getString(R.string.label_lan)
+                base == wan -> getString(R.string.label_wan)
                 else -> getString(R.string.label_offline)
             }
             ui.post {
@@ -391,9 +417,9 @@ class MainActivity : Activity() {
                     currentBase = base
                     web.loadUrl(base)
                 }
-                // ушли на WAN — изредка проверяем, не вернулась ли локальная сеть,
-                // но страницу при этом не перезагружаем
-                if (!lanOk && wanOk && !recheckScheduled) {
+                // сидим на WAN — раз в минуту пробуем вернуться в локальную сеть,
+                // страницу при этом не перезагружаем
+                if (base == wan && !recheckScheduled) {
                     recheckScheduled = true
                     ui.postDelayed({
                         recheckScheduled = false
