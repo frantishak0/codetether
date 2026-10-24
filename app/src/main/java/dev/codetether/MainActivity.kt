@@ -71,6 +71,12 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = openPrefs()
 
+        // если запрошен сброс кэша — чистим данные WebView до его создания
+        if (prefs.getBoolean("needsWebReset", false)) {
+            prefs.edit().putBoolean("needsWebReset", false).apply()
+            wipeWebViewData()
+        }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.WHITE)
@@ -177,6 +183,25 @@ class MainActivity : Activity() {
         )
     } catch (_: Exception) {
         getSharedPreferences("oc", Context.MODE_PRIVATE)
+    }
+
+    /** Удаляет данные WebView: HTTP-кэш, Code Cache, Local Storage, Service Worker. Cookies не трогаем. */
+    private fun wipeWebViewData() {
+        val base = File(dataDir, "app_webview")
+        listOf(
+            "Default/Service Worker",
+            "Default/Cache",
+            "Default/Code Cache",
+            "Default/Local Storage",
+            "Default/Session Storage",
+            "Default/Web Data",
+            "Default/blob_storage",
+            "Default/File System",
+            "Default/databases",
+            "Default/GPUCache",
+            "Default/DawnGraphiteCache",
+            "Default/DawnWebGPUCache"
+        ).forEach { rel -> runCatching { File(base, rel).deleteRecursively() } }
     }
 
     private fun applyInsets(root: LinearLayout) {
@@ -348,16 +373,16 @@ class MainActivity : Activity() {
                 }
                 status.text = "$label · $base"
 
-                // сервер обновился — в кэше WebView остались старые (уже не существующие) файлы
+                // сервер обновился (или это первый запуск после установки) — в WebView остался
+                // старый кэш, включая Service Worker, который отдаёт исчезнувшие файлы.
+                // Поэтому делаем жёсткий сброс данных WebView и перезапускаем активность.
                 val known = prefs.getString("serverVersion", null)
-                if (!serverVersion.isNullOrBlank() && (known == null || known != serverVersion)) {
-                    prefs.edit().putString("serverVersion", serverVersion).apply()
-                    web.clearCache(true)
-                    if (known != null) {
-                        status.text = getString(R.string.status_cache_reset, label, base, serverVersion)
-                    }
-                    currentBase = base
-                    web.loadUrl(base)
+                if (!serverVersion.isNullOrBlank() && known != serverVersion) {
+                    prefs.edit()
+                        .putString("serverVersion", serverVersion)
+                        .putBoolean("needsWebReset", true)
+                        .apply()
+                    recreate()
                     return@post
                 }
 
@@ -461,10 +486,8 @@ class MainActivity : Activity() {
                     0 -> startScan()
                     1 -> checkUpdates(manual = true)
                     2 -> {
-                        web.clearCache(true)
-                        status.text = getString(R.string.cache_cleared)
-                        currentBase = null
-                        connect(force = true, reload = true)
+                        prefs.edit().putBoolean("needsWebReset", true).apply()
+                        recreate()
                     }
                     3 -> {
                         CookieManager.getInstance().removeAllCookies(null)
