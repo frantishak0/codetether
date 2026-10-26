@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.provider.Settings
 import android.text.InputType
 import android.util.Base64
@@ -28,6 +29,7 @@ import android.webkit.CookieManager
 import android.webkit.HttpAuthHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -125,6 +127,8 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
         }
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
@@ -137,11 +141,40 @@ class MainActivity : Activity() {
                 else handler?.cancel()
             }
 
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val uri = request?.url ?: return false
+                val scheme = uri.scheme?.lowercase() ?: return false
+                if (scheme != "http" && scheme != "https") {
+                    return openExternally(uri)   // mailto:, tel:, intent: и т.п.
+                }
+                val serverHost = runCatching { Uri.parse(currentBase ?: "").host }.getOrNull()
+                if (uri.host != null && uri.host == serverHost) return false  // свой сервер — внутри
+                return openExternally(uri)        // всё остальное — в браузер
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 CookieManager.getInstance().flush()
             }
         }
         web.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?
+            ): Boolean {
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                val helper = WebView(this@MainActivity)
+                helper.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(v: WebView?, r: WebResourceRequest?): Boolean {
+                        val uri = r?.url
+                        if (uri != null) openExternally(uri)
+                        helper.destroy()
+                        return true
+                    }
+                }
+                transport.webView = helper
+                resultMsg.sendToTarget()
+                return true
+            }
+
             override fun onShowFileChooser(
                 webView: WebView?, cb: ValueCallback<Array<Uri>>?, params: FileChooserParams?
             ): Boolean {
@@ -217,6 +250,19 @@ class MainActivity : Activity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** Открывает ссылку во внешнем приложении (браузере). */
+    private fun openExternally(uri: Uri): Boolean {
+        return try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (_: Exception) {
+            Toast.makeText(this, getString(R.string.no_app_for_link), Toast.LENGTH_SHORT).show()
+            true
+        }
+    }
 
     // ---------------- настройка подключения ----------------
 

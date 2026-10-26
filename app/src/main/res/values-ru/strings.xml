@@ -42,4 +42,5 @@
     <string name="clear_cache">Очистить кэш</string>
     <string name="cache_cleared">кэш очищен</string>
     <string name="status_cache_reset">%1$s · %2$s · сервер обновлён до %3$s, кэш сброшен</string>
+    <string name="no_app_for_link">Нет приложения для этой ссылки</string>
 </resources>
