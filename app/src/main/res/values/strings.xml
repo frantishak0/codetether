@@ -43,4 +43,10 @@
     <string name="cache_cleared">cache cleared</string>
     <string name="status_cache_reset">%1$s · %2$s · server updated to %3$s, cache reset</string>
     <string name="no_app_for_link">No app can open this link</string>
+    <string name="confirm_setup_title">Connect to a new server?</string>
+    <string name="confirm_setup_message">Settings to apply:\n%1$s\n\nThe app will send the password only to these hosts. Continue?</string>
+    <string name="confirm_host_lan">LAN: %1$s</string>
+    <string name="confirm_host_wan">WAN: %1$s</string>
+    <string name="confirm_with_password">Password: will be stored</string>
+    <string name="confirm_apply">Connect</string>
 </resources>

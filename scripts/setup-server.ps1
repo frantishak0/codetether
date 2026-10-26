@@ -181,6 +181,8 @@ if (-not $qrOk) {
     Write-Warn2 'не удалось отрисовать QR (нужны Node.js и npm) — используйте ссылку ниже'
 }
 
+Write-Warn2 'QR содержит пароль сервера — не публикуйте скриншот и не показывайте его посторонним'
+
 Write-Host ''
 Write-Host 'Ссылка для вставки вручную:' -ForegroundColor White
 Write-Host $deep

@@ -65,6 +65,25 @@ class MainActivity : Activity() {
     private lateinit var cm: ConnectivityManager
     private lateinit var prefs: SharedPreferences
 
+    /** Пароль держим в памяти, если шифрованное хранилище недоступно (без тихого отката в plaintext). */
+    private var memoryPassword: String? = null
+    private var secureStorage = true
+
+    private fun getPassword(): String =
+        memoryPassword ?: if (secureStorage) (prefs.getString("password", "") ?: "") else ""
+
+    private fun putPassword(value: String) {
+        if (secureStorage) prefs.edit().putString("password", value).apply() else memoryPassword = value
+    }
+
+    /** Хосты, которым разрешено отдавать пароль (только настроенные адреса сервера). */
+    private fun trustedHosts(): Set<String> = setOfNotNull(
+        runCatching { Uri.parse(lanUrl()).host }.getOrNull(),
+        runCatching { Uri.parse(wanUrl()).host }.getOrNull()
+    )
+
+    private fun isTrustedHost(host: String?): Boolean = host != null && trustedHosts().contains(host)
+
     private fun lanUrl() = (prefs.getString("lan", DEFAULT_LAN) ?: "").trim().trimEnd('/')
     private fun wanUrl() = (prefs.getString("wan", "") ?: "").trim().trimEnd('/')
     private fun timeout() = prefs.getInt("timeout", 1200)
@@ -129,6 +148,12 @@ class MainActivity : Activity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = true
+            allowFileAccess = false
+            allowContentAccess = false
+            allowFileAccessFromFileURLs = false
+            allowUniversalAccessFromFileURLs = false
+            setGeolocationEnabled(false)
+            setSaveFormData(false)
         }
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
@@ -136,8 +161,9 @@ class MainActivity : Activity() {
             override fun onReceivedHttpAuthRequest(
                 view: WebView?, handler: HttpAuthHandler?, host: String?, realm: String?
             ) {
-                val pw = prefs.getString("password", "") ?: ""
-                if (handler != null && pw.isNotBlank()) handler.proceed("opencode", pw)
+                val pw = getPassword()
+                // отдаём пароль только своему серверу, а не любому хосту, который попросит авторизацию
+                if (handler != null && pw.isNotBlank() && isTrustedHost(host)) handler.proceed("opencode", pw)
                 else handler?.cancel()
             }
 
@@ -215,6 +241,8 @@ class MainActivity : Activity() {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     } catch (_: Exception) {
+        // Keystore недоступен — работаем без сохранения пароля (в памяти до перезапуска)
+        secureStorage = false
         getSharedPreferences("oc", Context.MODE_PRIVATE)
     }
 
@@ -266,34 +294,47 @@ class MainActivity : Activity() {
 
     // ---------------- настройка подключения ----------------
 
-    private fun applySetupPayload(text: String): Boolean {
+    /** Разбирает payload из QR/JSON. Возвращает (lan, wan, password). */
+    private fun parseSetupPayload(text: String): Triple<String?, String?, String?>? {
         val json = when {
             text.startsWith("{") -> runCatching { JSONObject(text) }.getOrNull()
             text.startsWith("codetether://") -> runCatching {
-                val d = Uri.parse(text).getQueryParameter("d") ?: return false
+                val d = Uri.parse(text).getQueryParameter("d") ?: return null
                 JSONObject(String(Base64.decode(d, Base64.URL_SAFE or Base64.NO_WRAP)))
             }.getOrNull()
             else -> null
-        } ?: return false
+        } ?: return null
 
         val lan = json.optString("lan").ifBlank { null }
         val wan = json.optString("wan").ifBlank { null }
         val pw = json.optString("password").ifBlank { null }
-        if (lan == null && wan == null) return false
+        if (lan == null && wan == null) return null
+        return Triple(lan, wan, pw)
+    }
 
-        prefs.edit().apply {
-            lan?.let { putString("lan", it) }
-            wan?.let { putString("wan", it) }
-            pw?.let { putString("password", it) }
-        }.apply()
+    /** Показывает подтверждение перед сменой сервера: любая ссылка/интент могут перенастроить клиент. */
+    private fun confirmAndApply(lan: String?, wan: String?, pw: String?) {
+        val lines = buildString {
+            if (lan != null) append(getString(R.string.confirm_host_lan, lan)).append("\n")
+            if (wan != null) append(getString(R.string.confirm_host_wan, wan)).append("\n")
+            if (pw != null) append(getString(R.string.confirm_with_password))
+        }.trim()
 
-        suppressAuto = false
-        currentBase = null
-        ui.post {
-            Toast.makeText(this, getString(R.string.setup_applied), Toast.LENGTH_SHORT).show()
-            connect(force = true)
-        }
-        return true
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.confirm_setup_title))
+            .setMessage(getString(R.string.confirm_setup_message, lines))
+            .setPositiveButton(getString(R.string.confirm_apply)) { _: DialogInterface, _: Int ->
+                prefs.edit().apply {
+                    lan?.let { putString("lan", it) }
+                    wan?.let { putString("wan", it) }
+                }.apply()
+                if (pw != null) putPassword(pw)
+                suppressAuto = false
+                currentBase = null
+                connect(force = true)
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
     }
 
     private fun startScan() {
@@ -322,50 +363,51 @@ class MainActivity : Activity() {
     private fun openFromIntent(intent: Intent?): Boolean {
         if (intent == null) return false
 
-        intent.getStringExtra("lan")?.let { if (it.isNotBlank()) prefs.edit().putString("lan", it).apply() }
-        intent.getStringExtra("wan")?.let { if (it.isNotBlank()) prefs.edit().putString("wan", it).apply() }
-        intent.getStringExtra("password")?.let { prefs.edit().putString("password", it).apply() }
-
+        val xLan = intent.getStringExtra("lan")?.ifBlank { null }
+        val xWan = intent.getStringExtra("wan")?.ifBlank { null }
+        val xPw = intent.getStringExtra("password")?.ifBlank { null }
         val data = intent.data?.toString() ?: intent.getStringExtra("url")
+
+        // 1. только extras (автоматизация, отладка)
         if (data.isNullOrBlank()) {
-            val hadExtras = intent.hasExtra("lan") || intent.hasExtra("wan") || intent.hasExtra("password")
-            if (!hadExtras) return false
-            suppressAuto = false
-            currentBase = null
-            connect(force = true)
+            if (xLan == null && xWan == null && xPw == null) return false
+            confirmAndApply(xLan, xWan, xPw)
             return true
         }
 
-        // QR-полезная нагрузка или codetether://setup
-        if (applySetupPayload(data)) return true
+        // 2. QR / codetether://setup
+        val payload = parseSetupPayload(data)
+        if (payload != null) {
+            confirmAndApply(payload.first, payload.second, payload.third)
+            return true
+        }
 
-        // ссылка пейринга
+        // 3. ссылка пейринга — тоже требуем подтверждение хоста
         val origin = runCatching {
             val u = URL(data); "${u.protocol}://${u.host}:${u.port}"
         }.getOrNull()
-        if (origin != null) {
-            val isTailnet = origin.startsWith("http://100.") || origin.contains("ts.net")
-            if (isTailnet) prefs.edit().putString("wan", origin).apply()
-            else prefs.edit().putString("lan", origin).apply()
-        }
-
-        suppressAuto = true
-        status.text = getString(R.string.status_pairing, data.take(70))
-        web.loadUrl(data)
+        if (origin == null) return false
+        val isTailnet = origin.startsWith("http://100.") || origin.contains("ts.net")
+        confirmAndApply(
+            if (isTailnet) null else origin,
+            if (isTailnet) origin else null,
+            xPw
+        )
         return true
     }
 
     /** Проверяет доступность сервера. Возвращает пару: доступен ли, версия сервера (если отдал). */
     private fun probeInfo(base: String?, timeoutMs: Int): Pair<Boolean, String?> {
         if (base.isNullOrBlank()) return false to null
-        val pw = prefs.getString("password", "") ?: ""
+        val pw = getPassword()
+        val host = runCatching { Uri.parse(base).host }.getOrNull()
         return try {
             val conn = URL("$base/api/info").openConnection() as HttpURLConnection
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
             conn.requestMethod = "GET"
             conn.setRequestProperty("User-Agent", "CodeTether/${BuildConfig.VERSION_NAME}")
-            if (pw.isNotBlank()) {
+            if (pw.isNotBlank() && isTrustedHost(host)) {
                 val token = Base64.encodeToString("opencode:$pw".toByteArray(), Base64.NO_WRAP)
                 conn.setRequestProperty("Authorization", "Basic $token")
             }
@@ -534,7 +576,7 @@ class MainActivity : Activity() {
                     .putString("lan", eLan.text.toString().trim())
                     .putString("wan", eWan.text.toString().trim())
                     .putInt("timeout", eTimeout.text.toString().toIntOrNull() ?: 1200)
-                    .putString("password", ePass.text.toString().trim())
+                    .also { putPassword(ePass.text.toString().trim()) }
                     .apply()
                 currentBase = null
                 connect(force = true)
@@ -702,7 +744,10 @@ class MainActivity : Activity() {
         val scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
         if (scan != null) {
             val text = scan.contents
-            if (!text.isNullOrBlank() && !applySetupPayload(text)) {
+            val payload = if (!text.isNullOrBlank()) parseSetupPayload(text) else null
+            if (payload != null) {
+                confirmAndApply(payload.first, payload.second, payload.third)
+            } else {
                 Toast.makeText(this, getString(R.string.scan_unknown), Toast.LENGTH_LONG).show()
             }
             return
