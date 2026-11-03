@@ -106,12 +106,12 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(12), dp(8), dp(12), dp(8))
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#F2F3F5"))
+            setBackgroundColor(HEADER_COLOR)
         }
         status = TextView(this).apply {
             text = getString(R.string.status_searching)
             textSize = 12f
-            setTextColor(Color.parseColor("#444444"))
+            setTextColor(HEADER_TEXT_COLOR)
             setTypeface(Typeface.MONOSPACE)
             maxLines = 2
         }
@@ -216,9 +216,17 @@ class MainActivity : Activity() {
             }
         }
 
+        for (i in 0 until bar.childCount) {
+            (bar.getChildAt(i) as? Button)?.let {
+                it.setTextColor(HEADER_TEXT_COLOR)
+                it.backgroundTintList = android.content.res.ColorStateList.valueOf(HEADER_BUTTON_COLOR)
+            }
+        }
+
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
+        applyDarkSystemBars()
         applyInsets(root)
 
         cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -263,6 +271,22 @@ class MainActivity : Activity() {
             "Default/DawnGraphiteCache",
             "Default/DawnWebGPUCache"
         ).forEach { rel -> runCatching { File(base, rel).deleteRecursively() } }
+    }
+
+    /** Чёрная шапка и системные панели с белыми иконками. */
+    private fun applyDarkSystemBars() {
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.insetsController?.setSystemBarsAppearance(
+                0,
+                android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                    android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = 0
+        }
     }
 
     private fun applyInsets(root: LinearLayout) {
@@ -778,6 +802,9 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private val HEADER_COLOR = Color.parseColor("#0B1220")
+        private val HEADER_TEXT_COLOR = Color.parseColor("#E6EDF7")
+        private val HEADER_BUTTON_COLOR = Color.parseColor("#1B2540")
         private const val FILE_CHOOSER_REQUEST = 1001
         private const val REQ_CAMERA = 1002
         private const val DEFAULT_LAN = "http://192.168.1.2:49374"
