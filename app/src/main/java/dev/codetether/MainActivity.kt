@@ -3,6 +3,7 @@ package dev.codetether
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.DownloadManager
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
@@ -14,8 +15,11 @@ import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -42,6 +46,7 @@ import androidx.core.content.FileProvider
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.zxing.integration.android.IntentIntegrator
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -100,7 +105,7 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.WHITE)
+            setBackgroundColor(HEADER_COLOR)
         }
         bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -182,6 +187,10 @@ class MainActivity : Activity() {
                 CookieManager.getInstance().flush()
             }
         }
+        web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            enqueueDownload(url, userAgent, contentDisposition, mimeType)
+        }
+
         web.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(
                 view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message?
@@ -239,6 +248,7 @@ class MainActivity : Activity() {
 
         if (!openFromIntent(intent)) connect(force = false)
         maybeCheckUpdates()
+        askNotificationPermission()
     }
 
     private fun openPrefs(): SharedPreferences = try {
@@ -613,7 +623,10 @@ class MainActivity : Activity() {
     private fun showMoreMenu() {
         val items = arrayOf(
             getString(R.string.scan_qr),
+            getString(R.string.discover),
+            getString(R.string.sessions),
             getString(R.string.check_updates),
+            getString(R.string.about),
             getString(R.string.clear_cache),
             getString(R.string.clear_cookies)
         )
@@ -622,12 +635,15 @@ class MainActivity : Activity() {
             .setItems(items) { _: DialogInterface, which: Int ->
                 when (which) {
                     0 -> startScan()
-                    1 -> checkUpdates(manual = true)
-                    2 -> {
+                    1 -> discoverServers()
+                    2 -> showSessions()
+                    3 -> checkUpdates(manual = true)
+                    4 -> showAbout()
+                    5 -> {
                         prefs.edit().putBoolean("needsWebReset", true).apply()
                         recreate()
                     }
-                    3 -> {
+                    6 -> {
                         CookieManager.getInstance().removeAllCookies(null)
                         CookieManager.getInstance().flush()
                         status.text = getString(R.string.cookies_cleared)
@@ -753,6 +769,199 @@ class MainActivity : Activity() {
         openFromIntent(intent)
     }
 
+
+    // ---------------- скачивание файлов ----------------
+
+    private fun guessFileName(disposition: String?, url: String, mime: String?): String {
+        val fromHeader = disposition?.let {
+            Regex("filename\\*?=\"?([^\";]+)\"?").find(it)?.groupValues?.getOrNull(1)
+        }
+        val fromUrl = Uri.parse(url).lastPathSegment
+        val name = (fromHeader ?: fromUrl ?: "download").trim().trim('"')
+        return if (name.contains('.')) name else name + when {
+            mime?.contains("zip") == true -> ".zip"
+            mime?.contains("pdf") == true -> ".pdf"
+            mime?.startsWith("image/") == true -> ".png"
+            else -> ""
+        }
+    }
+
+    private fun enqueueDownload(url: String, userAgent: String?, disposition: String?, mime: String?) {
+        try {
+            if (!url.startsWith("http")) { openExternally(Uri.parse(url)); return }
+            val uri = Uri.parse(url)
+            val fileName = guessFileName(disposition, url, mime)
+            val request = DownloadManager.Request(uri).apply {
+                setTitle(fileName)
+                mime?.let { setMimeType(it) }
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                userAgent?.let { addRequestHeader("User-Agent", it) }
+                CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                val pw = getPassword()
+                if (pw.isNotBlank() && isTrustedHost(uri.host)) {
+                    val token = Base64.encodeToString("opencode:$pw".toByteArray(), Base64.NO_WRAP)
+                    addRequestHeader("Authorization", "Basic $token")
+                }
+            }
+            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            Toast.makeText(this, getString(R.string.download_started, fileName), Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            openExternally(Uri.parse(url))  // запасной путь — отдать браузеру
+        }
+    }
+
+    // ---------------- список сессий ----------------
+
+    private fun showSessions() {
+        val base = currentBase ?: lanUrl()
+        if (base.isBlank()) { Toast.makeText(this, getString(R.string.status_no_address), Toast.LENGTH_SHORT).show(); return }
+        Toast.makeText(this, getString(R.string.loading), Toast.LENGTH_SHORT).show()
+        io.execute {
+            val items = runCatching {
+                val conn = URL("$base/api/session").openConnection() as HttpURLConnection
+                conn.connectTimeout = 5000; conn.readTimeout = 7000
+                val pw = getPassword()
+                if (pw.isNotBlank() && isTrustedHost(Uri.parse(base).host)) {
+                    val token = Base64.encodeToString("opencode:$pw".toByteArray(), Base64.NO_WRAP)
+                    conn.setRequestProperty("Authorization", "Basic $token")
+                }
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+                val root = JSONObject("{\"data\":\"\"}")
+                val arr = runCatching { JSONArray(body) }.getOrElse {
+                    JSONObject(body).optJSONArray("data") ?: JSONArray()
+                }
+                (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    val model = o.optJSONObject("model")?.optString("id").orEmpty()
+                    val ts = o.optJSONObject("time")?.optLong("updated") ?: 0L
+                    val when_ = if (ts > 0) java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts)) else ""
+                    "${o.optString("title").ifBlank { o.optString("id") }}  ·  $model  ·  $when_"
+                }
+            }.getOrDefault(emptyList())
+            ui.post {
+                if (items.isEmpty()) {
+                    Toast.makeText(this, getString(R.string.sessions_empty), Toast.LENGTH_SHORT).show()
+                    return@post
+                }
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.sessions))
+                    .setItems(items.toTypedArray()) { _: DialogInterface, _: Int ->
+                        // веб-интерфейс не поддерживает прямые ссылки на сессию — открываем список
+                        currentBase = base
+                        web.loadUrl(base)
+                    }
+                    .setNegativeButton(getString(R.string.cancel), null)
+                    .show()
+            }
+        }
+    }
+
+
+    // ---------------- поиск сервера в локальной сети ----------------
+
+    private fun discoverServers() {
+        val nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
+        val results = java.util.Collections.synchronizedList(mutableListOf<Pair<String, String>>())
+        val queue = java.util.concurrent.LinkedBlockingQueue<NsdServiceInfo>()
+        var resolving = false
+
+        fun resolveNext() {
+            if (resolving) return
+            val info = queue.poll() ?: return
+            resolving = true
+            runCatching {
+                nsd.resolveService(info, object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
+                        resolving = false
+                        ui.post { resolveNext() }
+                    }
+
+                    override fun onServiceResolved(serviceInfo: NsdServiceInfo?) {
+                        val host = serviceInfo?.host?.hostAddress
+                        val port = serviceInfo?.port ?: 0
+                        val name = serviceInfo?.serviceName ?: "service"
+                        if (host == null || port == 0) {
+                            resolving = false; ui.post { resolveNext() }; return
+                        }
+                        io.execute {
+                            val url = "http://$host:$port"
+                            val ok = probeInfo(url, 1500).first
+                            ui.post {
+                                if (ok) results.add(url to "$name · $url")
+                                resolving = false
+                                resolveNext()
+                            }
+                        }
+                    }
+                })
+            }.onFailure {
+                resolving = false
+                ui.post { resolveNext() }
+            }
+        }
+
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String?) {}
+            override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
+                ui.post { Toast.makeText(this@MainActivity, getString(R.string.discover_failed), Toast.LENGTH_SHORT).show() }
+            }
+            override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) {}
+            override fun onDiscoveryStopped(serviceType: String?) {}
+            override fun onServiceLost(serviceInfo: NsdServiceInfo?) {}
+            override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
+                if (serviceInfo != null) { queue.add(serviceInfo); ui.post { resolveNext() } }
+            }
+        }
+
+        Toast.makeText(this, getString(R.string.discovering), Toast.LENGTH_SHORT).show()
+        runCatching { nsd.discoverServices("_http._tcp.", NsdManager.PROTOCOL_DNS_SD, listener) }
+            .onFailure {
+                Toast.makeText(this, getString(R.string.discover_failed), Toast.LENGTH_SHORT).show()
+                return
+            }
+
+        ui.postDelayed({
+            runCatching { nsd.stopServiceDiscovery(listener) }
+            val items = results.map { it.second }
+            if (items.isEmpty()) {
+                Toast.makeText(this, getString(R.string.discover_empty), Toast.LENGTH_LONG).show()
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.discover_title))
+                    .setItems(items.toTypedArray()) { _: DialogInterface, which: Int ->
+                        val url = results[which].first
+                        prefs.edit().putString("lan", url).apply()
+                        currentBase = null
+                        connect(force = true, reload = true)
+                    }
+                    .setNegativeButton(getString(R.string.cancel), null)
+                    .show()
+            }
+        }, 4000)
+    }
+
+    // ---------------- о приложении ----------------
+
+    private fun showAbout() {
+        val server = prefs.getString("serverVersion", null) ?: "—"
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.about))
+            .setMessage(
+                getString(
+                    R.string.about_message,
+                    BuildConfig.VERSION_NAME,
+                    BuildConfig.VERSION_CODE.toString(),
+                    currentBase ?: "—",
+                    server
+                )
+            )
+            .setPositiveButton(getString(R.string.close), null)
+            .setNeutralButton(getString(R.string.check_updates)) { _: DialogInterface, _: Int -> checkUpdates(manual = true) }
+            .show()
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (this::web.isInitialized && web.canGoBack()) web.goBack() else @Suppress("DEPRECATION") super.onBackPressed()
@@ -791,6 +1000,38 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
     }
 
+    override fun onStart() {
+        super.onStart()
+        runCatching { stopService(Intent(this, WatchService::class.java)) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        startWatcher()
+    }
+
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+        }
+    }
+
+    /** Пока приложение в фоне — слушаем события сервера и показываем уведомление о завершении задачи. */
+    private fun startWatcher() {
+        if (prefs.getString("password", "")?.isBlank() != false) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                startForegroundService(Intent(this, WatchService::class.java))
+            else
+                startService(Intent(this, WatchService::class.java))
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         connect(force = false)
@@ -807,6 +1048,7 @@ class MainActivity : Activity() {
         private val HEADER_BUTTON_COLOR = Color.parseColor("#1B2540")
         private const val FILE_CHOOSER_REQUEST = 1001
         private const val REQ_CAMERA = 1002
+        private const val REQ_NOTIFICATIONS = 1003
         private const val DEFAULT_LAN = "http://192.168.1.2:49374"
         private const val REPO_API = "https://api.github.com/repos/frantishak0/codetether"
     }

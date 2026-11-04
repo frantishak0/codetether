@@ -49,4 +49,21 @@
     <string name="confirm_host_wan">WAN: %1$s</string>
     <string name="confirm_with_password">Пароль: будет сохранён</string>
     <string name="confirm_apply">Подключиться</string>
+    <string name="sessions">Сессии</string>
+    <string name="sessions_empty">Сессий пока нет</string>
+    <string name="loading">Загрузка…</string>
+    <string name="about">О приложении</string>
+    <string name="close">Закрыть</string>
+    <string name="download_started">Скачивание: %1$s</string>
+    <string name="about_message">Версия приложения: %1$s (%2$s)\nСервер: %3$s\nВерсия OpenCode: %4$s</string>
+    <string name="watch_running">Слежу за задачами…</string>
+    <string name="channel_watch">Фоновое наблюдение</string>
+    <string name="channel_tasks">Уведомления о задачах</string>
+    <string name="task_done">Задача завершена: %1$s</string>
+    <string name="task_failed">Задача не выполнена: %1$s</string>
+    <string name="discover">Найти сервер в сети</string>
+    <string name="discovering">Ищу серверы…</string>
+    <string name="discover_empty">В этой сети серверы не найдены</string>
+    <string name="discover_failed">Не удалось запустить поиск</string>
+    <string name="discover_title">Найденные серверы</string>
 </resources>

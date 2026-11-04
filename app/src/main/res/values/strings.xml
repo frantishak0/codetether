@@ -49,4 +49,21 @@
     <string name="confirm_host_wan">WAN: %1$s</string>
     <string name="confirm_with_password">Password: will be stored</string>
     <string name="confirm_apply">Connect</string>
+    <string name="sessions">Sessions</string>
+    <string name="sessions_empty">No sessions yet</string>
+    <string name="loading">Loading…</string>
+    <string name="about">About</string>
+    <string name="close">Close</string>
+    <string name="download_started">Downloading %1$s</string>
+    <string name="about_message">App version: %1$s (%2$s)\nServer: %3$s\nOpenCode version: %4$s</string>
+    <string name="watch_running">Watching tasks…</string>
+    <string name="channel_watch">Background watch</string>
+    <string name="channel_tasks">Task notifications</string>
+    <string name="task_done">Task finished: %1$s</string>
+    <string name="task_failed">Task failed: %1$s</string>
+    <string name="discover">Find server in LAN</string>
+    <string name="discovering">Looking for servers…</string>
+    <string name="discover_empty">No servers found in this network</string>
+    <string name="discover_failed">Discovery failed</string>
+    <string name="discover_title">Found servers</string>
 </resources>
