@@ -78,6 +78,28 @@ else
   warn "ufw не найден — убедитесь, что порт $PORT открыт"
 fi
 
+# ---------- 4b. mDNS, чтобы приложение нашло сервер в локальной сети ----------
+if command -v avahi-daemon >/dev/null 2>&1; then
+  if sudo -n true 2>/dev/null; then
+    sudo mkdir -p /etc/avahi/services
+    sudo tee /etc/avahi/services/codetether.service >/dev/null <<'AVAHI'
+<?xml version="1.0" standalone='no'?><!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">OpenCode on %h</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>49374</port>
+  </service>
+</service-group>
+AVAHI
+    sudo systemctl enable --now avahi-daemon >/dev/null 2>&1 \
+      && ok "mDNS: сервер будет находиться в локальной сети" || warn "не удалось включить avahi-daemon"
+  else
+    warn "для автопоиска сервера в сети нужен sudo:"
+    say  "    sudo systemctl enable --now avahi-daemon"
+  fi
+fi
+
 # ---------- 5. tailscale ----------
 WAN=""
 if command -v tailscale >/dev/null 2>&1; then
