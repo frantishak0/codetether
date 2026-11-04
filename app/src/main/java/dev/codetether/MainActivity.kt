@@ -180,7 +180,12 @@ class MainActivity : Activity() {
                 }
                 val serverHost = runCatching { Uri.parse(currentBase ?: "").host }.getOrNull()
                 if (uri.host != null && uri.host == serverHost) return false  // свой сервер — внутри
-                return openExternally(uri)        // всё остальное — в браузер
+                // прямые ссылки на файлы качаем сами (в «Загрузки»), остальное — в браузер
+                if (looksLikeDownload(uri)) {
+                    enqueueDownload(uri.toString(), null, null, null)
+                    return true
+                }
+                return openExternally(uri)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -771,6 +776,17 @@ class MainActivity : Activity() {
 
 
     // ---------------- скачивание файлов ----------------
+
+    private val downloadExtensions = setOf(
+        "zip", "tar", "gz", "tgz", "7z", "rar", "pdf", "apk",
+        "docx", "xlsx", "pptx", "csv", "bin", "img", "iso", "dmg", "exe", "msi"
+    )
+
+    private fun looksLikeDownload(uri: Uri): Boolean {
+        val path = uri.path?.lowercase() ?: return false
+        val ext = path.substringAfterLast('.', "")
+        return ext in downloadExtensions
+    }
 
     private fun guessFileName(disposition: String?, url: String, mime: String?): String {
         val fromHeader = disposition?.let {
