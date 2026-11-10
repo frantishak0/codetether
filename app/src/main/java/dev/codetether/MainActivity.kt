@@ -66,6 +66,7 @@ class MainActivity : Activity() {
     private var probing = false
     private var suppressAuto = false
     private var recheckScheduled = false
+    private var swCleared = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var cm: ConnectivityManager
     private lateinit var prefs: SharedPreferences
@@ -102,6 +103,7 @@ class MainActivity : Activity() {
         if (prefs.getBoolean("needsWebReset", false) || installedVersion != BuildConfig.VERSION_NAME) {
             prefs.edit()
                 .putBoolean("needsWebReset", false)
+                .putBoolean("needsSwClear", true)
                 .putString("appVersion", BuildConfig.VERSION_NAME)
                 .apply()
             wipeWebViewData()
@@ -194,6 +196,7 @@ class MainActivity : Activity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 CookieManager.getInstance().flush()
+                clearServiceWorkerOnce()
             }
         }
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -315,6 +318,35 @@ class MainActivity : Activity() {
                 web.setPadding(0, 0, 0, bars.bottom)
                 insets
             }
+        }
+    }
+
+    /**
+     * Удаляет Service Worker и его CacheStorage изнутри страницы.
+     * Файловый сброс не работает: процесс Chromium держит файлы открытыми.
+     */
+    private fun clearServiceWorkerOnce() {
+        if (swCleared || !prefs.getBoolean("needsSwClear", false)) return
+        val js = """
+            (async () => {
+              try {
+                if (navigator.serviceWorker) {
+                  const regs = await navigator.serviceWorker.getRegistrations();
+                  for (const r of regs) { await r.unregister(); }
+                }
+                if (window.caches) {
+                  const keys = await caches.keys();
+                  for (const k of keys) { await caches.delete(k); }
+                }
+                return 'ok';
+              } catch (e) { return 'err:' + e; }
+            })();
+        """.trimIndent()
+        swCleared = true
+        web.evaluateJavascript(js) { result ->
+            prefs.edit().putBoolean("needsSwClear", false).apply()
+            status.text = getString(R.string.cache_cleared)
+            web.reload()
         }
     }
 
@@ -647,7 +679,10 @@ class MainActivity : Activity() {
                     3 -> checkUpdates(manual = true)
                     4 -> showAbout()
                     5 -> {
-                        prefs.edit().putBoolean("needsWebReset", true).apply()
+                        prefs.edit()
+                            .putBoolean("needsWebReset", true)
+                            .putBoolean("needsSwClear", true)
+                            .apply()
                         recreate()
                     }
                     6 -> {
