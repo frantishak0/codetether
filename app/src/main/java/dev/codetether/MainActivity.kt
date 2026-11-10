@@ -97,9 +97,13 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = openPrefs()
 
-        // если запрошен сброс кэша — чистим данные WebView до его создания
-        if (prefs.getBoolean("needsWebReset", false)) {
-            prefs.edit().putBoolean("needsWebReset", false).apply()
+        // сброс данных WebView: по запросу или после обновления самого приложения
+        val installedVersion = prefs.getString("appVersion", null)
+        if (prefs.getBoolean("needsWebReset", false) || installedVersion != BuildConfig.VERSION_NAME) {
+            prefs.edit()
+                .putBoolean("needsWebReset", false)
+                .putString("appVersion", BuildConfig.VERSION_NAME)
+                .apply()
             wipeWebViewData()
         }
 
@@ -276,8 +280,6 @@ class MainActivity : Activity() {
             "Default/Service Worker",
             "Default/Cache",
             "Default/Code Cache",
-            "Default/Local Storage",
-            "Default/Session Storage",
             "Default/Web Data",
             "Default/blob_storage",
             "Default/File System",

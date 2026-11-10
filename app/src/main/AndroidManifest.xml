@@ -20,6 +20,7 @@
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true"
         android:allowBackup="false"
+        android:largeHeap="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:supportsRtl="true"
