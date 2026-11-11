@@ -67,6 +67,7 @@ class MainActivity : Activity() {
     private var suppressAuto = false
     private var recheckScheduled = false
     private var swCleared = false
+    private var forceFresh = false
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var cm: ConnectivityManager
     private lateinit var prefs: SharedPreferences
@@ -196,6 +197,10 @@ class MainActivity : Activity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 CookieManager.getInstance().flush()
+                if (forceFresh) {
+                    forceFresh = false
+                    web.settings.cacheMode = WebSettings.LOAD_DEFAULT
+                }
                 clearServiceWorkerOnce()
             }
         }
@@ -343,10 +348,14 @@ class MainActivity : Activity() {
             })();
         """.trimIndent()
         swCleared = true
-        web.evaluateJavascript(js) { result ->
+        web.evaluateJavascript(js) { _ ->
             prefs.edit().putBoolean("needsSwClear", false).apply()
             status.text = getString(R.string.cache_cleared)
-            web.reload()
+            forceFresh = true
+            web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+            web.clearCache(true)
+            val base = currentBase ?: lanUrl()
+            web.loadUrl("$base/?v=" + System.currentTimeMillis())
         }
     }
 
