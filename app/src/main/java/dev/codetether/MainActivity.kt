@@ -359,6 +359,15 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Документ всегда грузим с версией в URL: так HTTP-кэш не может отдать старый index.html,
+     * который ссылается на уже не существующие файлы.
+     */
+    private fun pageUrl(base: String): String {
+        val v = prefs.getString("serverVersion", null) ?: BuildConfig.VERSION_NAME
+        return "$base/?v=$v"
+    }
+
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     /** Открывает ссылку во внешнем приложении (браузере). */
@@ -585,7 +594,7 @@ class MainActivity : Activity() {
                 // перезагружаем страницу только если адрес изменился (или это ручное ⟳)
                 if (base != currentBase || reload) {
                     currentBase = base
-                    web.loadUrl(base)
+                    web.loadUrl(pageUrl(base))
                 }
                 // сидим на WAN — раз в минуту пробуем вернуться в локальную сеть,
                 // страницу при этом не перезагружаем
@@ -619,7 +628,7 @@ class MainActivity : Activity() {
         }
         currentBase = other
         status.text = getString(R.string.status_manual, other)
-        web.loadUrl(other)
+        web.loadUrl(pageUrl(other))
     }
 
     private fun showSettings() {
@@ -912,7 +921,7 @@ class MainActivity : Activity() {
                     .setItems(items.toTypedArray()) { _: DialogInterface, _: Int ->
                         // веб-интерфейс не поддерживает прямые ссылки на сессию — открываем список
                         currentBase = base
-                        web.loadUrl(base)
+                        web.loadUrl(pageUrl(base))
                     }
                     .setNegativeButton(getString(R.string.cancel), null)
                     .show()
