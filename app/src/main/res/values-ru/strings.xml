@@ -9,6 +9,7 @@
     <string name="status_no_second">второй адрес не задан (⚙)</string>
     <string name="status_pairing">pairing · %1$s</string>
     <string name="status_manual">вручную · %1$s</string>
+    <string name="status_recovering">обновляю интерфейс (была версия %1$s)…</string>
     <string name="label_lan">LAN</string>
     <string name="label_wan">WAN</string>
     <string name="label_offline">офлайн</string>

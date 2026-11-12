@@ -18,8 +18,8 @@ android {
         applicationId = "dev.codetether"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.2.6"
+        versionCode = 16
+        versionName = "1.2.7"
         resourceConfigurations += listOf("en", "ru")
     }
 

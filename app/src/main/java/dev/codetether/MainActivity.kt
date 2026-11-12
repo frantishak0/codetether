@@ -2,8 +2,10 @@ package dev.codetether
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
 import android.app.AlertDialog
 import android.app.DownloadManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
@@ -23,6 +25,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
+import android.os.Process
 import android.provider.Settings
 import android.text.InputType
 import android.util.Base64
@@ -34,7 +37,9 @@ import android.webkit.HttpAuthHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
+import android.webkit.WebStorage
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -48,6 +53,7 @@ import androidx.security.crypto.MasterKey
 import com.google.zxing.integration.android.IntentIntegrator
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -68,6 +74,8 @@ class MainActivity : Activity() {
     private var recheckScheduled = false
     private var swCleared = false
     private var forceFresh = false
+    private var healAttempts = 0
+    private var lastHealAt = 0L
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var cm: ConnectivityManager
     private lateinit var prefs: SharedPreferences
@@ -99,11 +107,16 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = openPrefs()
 
-        // сброс данных WebView: по запросу или после обновления самого приложения
+        // Полный сброс профиля WebView: по запросу, после обновления приложения
+        // или когда страница упорно показывает старую версию интерфейса.
         val installedVersion = prefs.getString("appVersion", null)
-        if (prefs.getBoolean("needsWebReset", false) || installedVersion != BuildConfig.VERSION_NAME) {
+        if (prefs.getBoolean("needsWebReset", false) ||
+            prefs.getBoolean("needsFullWipe", false) ||
+            installedVersion != BuildConfig.VERSION_NAME
+        ) {
             prefs.edit()
                 .putBoolean("needsWebReset", false)
+                .putBoolean("needsFullWipe", false)
                 .putBoolean("needsSwClear", true)
                 .putString("appVersion", BuildConfig.VERSION_NAME)
                 .apply()
@@ -179,6 +192,24 @@ class MainActivity : Activity() {
                 else handler?.cancel()
             }
 
+            override fun shouldInterceptRequest(
+                view: WebView?, request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val url = request?.url?.toString() ?: return null
+                // UI OpenCode регистрирует Workbox-Service-Worker, который на ЛЮБУЮ навигацию
+                // отдаёт закэшированный index.html (query-строку он игнорирует). В WebView он
+                // не нужен: подменяем на пустой SW, который сразу снимает себя с регистрации.
+                if (url.contains("/sw.js")) {
+                    val js = "self.addEventListener('install',e=>self.skipWaiting());" +
+                        "self.addEventListener('activate',e=>e.waitUntil(" +
+                        "(async()=>{try{await self.registration.unregister()}catch(err){}})()));"
+                    return WebResourceResponse(
+                        "text/javascript", "UTF-8", ByteArrayInputStream(js.toByteArray())
+                    )
+                }
+                return null
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
                 val scheme = uri.scheme?.lowercase() ?: return false
@@ -202,6 +233,7 @@ class MainActivity : Activity() {
                     web.settings.cacheMode = WebSettings.LOAD_DEFAULT
                 }
                 clearServiceWorkerOnce()
+                checkPageHealth()
             }
         }
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
@@ -282,20 +314,38 @@ class MainActivity : Activity() {
     }
 
     /** Удаляет данные WebView: HTTP-кэш, Code Cache, Local Storage, Service Worker. Cookies не трогаем. */
+    /**
+     * Полностью удаляет профиль WebView.
+     *
+     * Важно: `WebView.clearCache()` и удаление отдельных подпапок НЕ убирают CacheStorage
+     * и регистрации Service Worker — именно они отдают старый index.html на любую
+     * навигацию (игнорируя `?v=`). Поэтому сносим каталог `app_webview` целиком.
+     * Вызывать только до создания WebView (или после перезапуска процесса).
+     */
     private fun wipeWebViewData() {
-        val base = File(dataDir, "app_webview")
-        listOf(
-            "Default/Service Worker",
-            "Default/Cache",
-            "Default/Code Cache",
-            "Default/Web Data",
-            "Default/blob_storage",
-            "Default/File System",
-            "Default/databases",
-            "Default/GPUCache",
-            "Default/DawnGraphiteCache",
-            "Default/DawnWebGPUCache"
-        ).forEach { rel -> runCatching { File(base, rel).deleteRecursively() } }
+        listOf("app_webview", "app_textures").forEach { name ->
+            runCatching { File(dataDir, name).deleteRecursively() }
+        }
+        runCatching { WebStorage.getInstance().deleteAllData() }
+        runCatching {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+        }
+    }
+
+    /** Перезапускает процесс приложения (нужно, чтобы Chromium отпустил профиль WebView). */
+    private fun restartApp() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+        val pi = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.set(AlarmManager.RTC, System.currentTimeMillis() + 300, pi)
+        finishAffinity()
+        Process.killProcess(Process.myPid())
     }
 
     /** Чёрная шапка и системные панели с белыми иконками. */
@@ -357,6 +407,41 @@ class MainActivity : Activity() {
             val base = currentBase ?: lanUrl()
             web.loadUrl("$base/?v=" + System.currentTimeMillis())
         }
+    }
+
+    /**
+     * Проверяет, что реально отрисовано: версию в подвале и текст ошибки.
+     * Service Worker мог отдать старый index.html — тогда версия на странице не совпадёт
+     * с /api/info. В этом случае снимаем SW, чистим CacheStorage и перезагружаем документ.
+     * После нескольких неудач — полный сброс профиля WebView и перезапуск.
+     */
+    private fun checkPageHealth() {
+        web.evaluateJavascript(HEALTH_JS) { raw ->
+            val parts = (raw ?: "").trim().removePrefix("\"").removeSuffix("\"").split("|")
+            if (parts.size < 4) return@evaluateJavascript
+            val pageVer = parts[0].trim()
+            val err = parts[3].trim() == "1"
+            val expected = prefs.getString("serverVersion", null)
+            val stale = pageVer.isNotEmpty() && !expected.isNullOrEmpty() && pageVer != expected
+            if (stale || err) heal(pageVer, expected) else healAttempts = 0
+        }
+    }
+
+    private fun heal(pageVer: String, expected: String?) {
+        val now = System.currentTimeMillis()
+        if (now - lastHealAt < 8000) return
+        lastHealAt = now
+        healAttempts++
+        if (healAttempts > 3) {
+            prefs.edit().putBoolean("needsFullWipe", true).apply()
+            restartApp()
+            return
+        }
+        status.text = getString(R.string.status_recovering, pageVer.ifEmpty { "?" })
+        forceFresh = true
+        web.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+        val base = currentBase ?: lanUrl()
+        web.loadUrl("$base/?v=${expected ?: now}&r=$now")
     }
 
     /**
@@ -583,11 +668,14 @@ class MainActivity : Activity() {
                 // Поэтому делаем жёсткий сброс данных WebView и перезапускаем активность.
                 val known = prefs.getString("serverVersion", null)
                 if (!serverVersion.isNullOrBlank() && known != serverVersion) {
+                    // Сервер обновился — в WebView остался старый интерфейс (и его Service
+                    // Worker). Полный сброс профиля возможен только в новом процессе,
+                    // поэтому перезапускаемся, а не просто recreate().
                     prefs.edit()
                         .putString("serverVersion", serverVersion)
-                        .putBoolean("needsWebReset", true)
+                        .putBoolean("needsFullWipe", true)
                         .apply()
-                    recreate()
+                    restartApp()
                     return@post
                 }
 
@@ -697,11 +785,9 @@ class MainActivity : Activity() {
                     3 -> checkUpdates(manual = true)
                     4 -> showAbout()
                     5 -> {
-                        prefs.edit()
-                            .putBoolean("needsWebReset", true)
-                            .putBoolean("needsSwClear", true)
-                            .apply()
-                        recreate()
+                        // Полный сброс: профиль WebView удаляем в новом процессе
+                        prefs.edit().putBoolean("needsFullWipe", true).apply()
+                        restartApp()
                     }
                     6 -> {
                         CookieManager.getInstance().removeAllCookies(null)
@@ -1120,6 +1206,43 @@ class MainActivity : Activity() {
         private const val FILE_CHOOSER_REQUEST = 1001
         private const val REQ_CAMERA = 1002
         private const val REQ_NOTIFICATIONS = 1003
+        /**
+         * Снимает регистрацию Service Worker и чистит CacheStorage, затем сообщает
+         * версию из подвала страницы и наличие экрана ошибки. Формат: "ver|sw|кэши|err".
+         */
+        private val HEALTH_JS = """
+            (async () => {
+              let ver = '';
+              try {
+                const t = (document.body && document.body.innerText) || '';
+                const m = t.match(/Версия:\s*([0-9][0-9.]*)/);
+                if (m) ver = m[1];
+              } catch (e) {}
+              let sw = 0;
+              try {
+                if (navigator.serviceWorker) {
+                  const regs = await navigator.serviceWorker.getRegistrations();
+                  sw = regs.length;
+                  for (const r of regs) { try { await r.unregister(); } catch (e) {} }
+                }
+              } catch (e) {}
+              let cacheCount = 0;
+              try {
+                if (window.caches) {
+                  const keys = await caches.keys();
+                  cacheCount = keys.length;
+                  for (const k of keys) { try { await caches.delete(k); } catch (e) {} }
+                }
+              } catch (e) {}
+              let err = 0;
+              try {
+                const t = (document.body && document.body.innerText) || '';
+                if (/Failed to fetch|Что-то пошло не так/.test(t)) err = 1;
+              } catch (e) {}
+              return ver + '|' + sw + '|' + cacheCount + '|' + err;
+            })();
+        """.trimIndent()
+
         private const val DEFAULT_LAN = "http://192.168.1.2:49374"
         private const val REPO_API = "https://api.github.com/repos/frantishak0/codetether"
     }

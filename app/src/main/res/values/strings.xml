@@ -9,6 +9,7 @@
     <string name="status_no_second">second address is not set (⚙)</string>
     <string name="status_pairing">pairing · %1$s</string>
     <string name="status_manual">manual · %1$s</string>
+    <string name="status_recovering">updating UI (had %1$s)…</string>
     <string name="label_lan">LAN</string>
     <string name="label_wan">WAN</string>
     <string name="label_offline">offline</string>
