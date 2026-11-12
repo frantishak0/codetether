@@ -417,11 +417,30 @@ class MainActivity : Activity() {
      */
     private fun checkPageHealth() {
         web.evaluateJavascript(HEALTH_JS) { raw ->
+            android.util.Log.i("CodeTetherHealth", "raw=$raw")
             val parts = (raw ?: "").trim().removePrefix("\"").removeSuffix("\"").split("|")
             if (parts.size < 4) return@evaluateJavascript
             val pageVer = parts[0].trim()
-            val err = parts[3].trim() == "1"
+            val err = parts[1].trim() == "1"
+            val ctrl = parts[2].trim()
+            val href = parts[3].trim()
             val expected = prefs.getString("serverVersion", null)
+            android.util.Log.i(
+                "CodeTetherHealth",
+                "href=$href pageVer=$pageVer serverVer=$expected err=$err controller=$ctrl"
+            )
+            // Диагностика: сколько регистраций Service Worker осталось после загрузки.
+            web.evaluateJavascript(
+                "(function(){try{navigator.serviceWorker.getRegistrations()" +
+                    ".then(function(r){window.__ctSw=r.length})" +
+                    ".catch(function(){window.__ctSw=-1})}catch(e){window.__ctSw=-2}return 'ok'})()"
+            ) {}
+            ui.postDelayed({
+                web.evaluateJavascript(
+                    "(window.__ctSw===undefined?'?':String(window.__ctSw))"
+                ) { v -> android.util.Log.i("CodeTetherHealth", "swRegistrations=$v") }
+            }, 3000)
+
             val stale = pageVer.isNotEmpty() && !expected.isNullOrEmpty() && pageVer != expected
             if (stale || err) heal(pageVer, expected) else healAttempts = 0
         }
@@ -1210,36 +1229,42 @@ class MainActivity : Activity() {
          * Снимает регистрацию Service Worker и чистит CacheStorage, затем сообщает
          * версию из подвала страницы и наличие экрана ошибки. Формат: "ver|sw|кэши|err".
          */
+        /**
+         * Синхронно сообщает версию из подвала, наличие экрана ошибки, контроллера SW
+         * и текущий URL. Снятие регистрации SW и чистка CacheStorage запускаются
+         * «в фоне» — evaluateJavascript не умеет ждать Promise.
+         * Формат: "ver|err|controller|href".
+         */
         private val HEALTH_JS = """
-            (async () => {
+            (function () {
               let ver = '';
               try {
                 const t = (document.body && document.body.innerText) || '';
                 const m = t.match(/Версия:\s*([0-9][0-9.]*)/);
                 if (m) ver = m[1];
               } catch (e) {}
-              let sw = 0;
-              try {
-                if (navigator.serviceWorker) {
-                  const regs = await navigator.serviceWorker.getRegistrations();
-                  sw = regs.length;
-                  for (const r of regs) { try { await r.unregister(); } catch (e) {} }
-                }
-              } catch (e) {}
-              let cacheCount = 0;
-              try {
-                if (window.caches) {
-                  const keys = await caches.keys();
-                  cacheCount = keys.length;
-                  for (const k of keys) { try { await caches.delete(k); } catch (e) {} }
-                }
-              } catch (e) {}
               let err = 0;
               try {
                 const t = (document.body && document.body.innerText) || '';
                 if (/Failed to fetch|Что-то пошло не так/.test(t)) err = 1;
               } catch (e) {}
-              return ver + '|' + sw + '|' + cacheCount + '|' + err;
+              let ctrl = 0;
+              try { ctrl = (navigator.serviceWorker && navigator.serviceWorker.controller) ? 1 : 0; } catch (e) {}
+              try {
+                if (navigator.serviceWorker) {
+                  navigator.serviceWorker.getRegistrations().then(function (rs) {
+                    rs.forEach(function (r) { try { r.unregister(); } catch (e) {} });
+                  }).catch(function () {});
+                }
+              } catch (e) {}
+              try {
+                if (window.caches) {
+                  caches.keys().then(function (ks) {
+                    ks.forEach(function (k) { try { caches.delete(k); } catch (e) {} });
+                  }).catch(function () {});
+                }
+              } catch (e) {}
+              return ver + '|' + err + '|' + ctrl + '|' + location.href;
             })();
         """.trimIndent()
 
