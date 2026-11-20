@@ -207,6 +207,13 @@ class MainActivity : Activity() {
                         "text/javascript", "UTF-8", ByteArrayInputStream(js.toByteArray())
                     )
                 }
+                // Полифил для старых WebView (URL.canParse и др.). Отдаём как отдельный
+                // same-origin скрипт, чтобы его пропускала CSP 'self'.
+                if (url.contains("/_ct_polyfill.js")) {
+                    return WebResourceResponse(
+                        "text/javascript", "UTF-8", ByteArrayInputStream(POLYFILL_JS.toByteArray())
+                    )
+                }
                 return null
             }
 
@@ -224,6 +231,12 @@ class MainActivity : Activity() {
                     return true
                 }
                 return openExternally(uri)
+            }
+
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // Полифилы должны успеть до module-скриптов страницы.
+                view?.evaluateJavascript(POLYFILL_JS, null)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -369,10 +382,22 @@ class MainActivity : Activity() {
             window.setDecorFitsSystemWindows(false)
             root.setOnApplyWindowInsetsListener { _, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                // Высота открытой клавиатуры. Без этого WebView на Android 15
+                // остаётся во весь экран и поле ввода уезжает под клавиатуру.
+                val ime = insets.getInsets(WindowInsets.Type.ime())
                 bar.setPadding(dp(12), dp(8) + bars.top, dp(12), dp(8))
-                web.setPadding(0, 0, 0, bars.bottom)
+                val bottom = maxOf(bars.bottom, ime.bottom)
+                // Меняем именно высоту WebView (margin), а не padding: так
+                // вьюпорт страницы гарантированно сжимается и нижние элементы
+                // (поле ввода) поднимаются над клавиатурой.
+                val lp = web.layoutParams as? LinearLayout.LayoutParams
+                if (lp != null && lp.bottomMargin != bottom) {
+                    lp.bottomMargin = bottom
+                    web.layoutParams = lp
+                }
                 insets
             }
+            root.requestApplyInsets()
         }
     }
 
@@ -1229,6 +1254,32 @@ class MainActivity : Activity() {
          * Снимает регистрацию Service Worker и чистит CacheStorage, затем сообщает
          * версию из подвала страницы и наличие экрана ошибки. Формат: "ver|sw|кэши|err".
          */
+        /**
+         * Полифилы для старых WebView (Chrome < 120): URL.canParse/parse,
+         * Promise.withResolvers/try, Map/Object.groupBy, Array.fromAsync и др.
+         */
+        private val POLYFILL_JS = """
+            (function () {
+              if (typeof URL.canParse !== "function") { URL.canParse = function (u, b) { try { new URL(u, b); return true } catch (e) { return false } } }
+              if (typeof URL.parse !== "function") { URL.parse = function (u, b) { try { return new URL(u, b) } catch (e) { return null } } }
+              if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { var r, j; var p = new Promise(function (a, b) { r = a; j = b }); return { promise: p, resolve: r, reject: j } } }
+              if (typeof Promise.try !== "function") { Promise.try = function (cb) { var a = [].slice.call(arguments, 1); return new Promise(function (res) { res(cb.apply(null, a)) }) } }
+              if (typeof Map.groupBy !== "function") { Map.groupBy = function (it, cb, t) { var m = new Map(); var i = 0; var v; for (v of it) { var k = cb.call(t, v, i++); var a = m.get(k); if (!a) { a = []; m.set(k, a) } a.push(v) } return m } }
+              if (typeof Object.groupBy !== "function") { Object.groupBy = function (it, cb, t) { var r = Object.create(null); var i = 0; var v; for (v of it) { var k = cb.call(t, v, i++); if (!r[k]) r[k] = []; r[k].push(v) } return r } }
+              if (typeof Array.fromAsync !== "function") { Array.fromAsync = function (it, fn, t) { return (async function () { var o = []; var i = 0; var v; for await (v of it) { o.push(fn ? await fn.call(t, v, i++) : v) } return o })() } }
+              if (!Array.prototype.toSorted) { Array.prototype.toSorted = function (c) { var a = Array.prototype.slice.call(this); return a.sort(c) } }
+              if (!Array.prototype.toReversed) { Array.prototype.toReversed = function () { return Array.prototype.slice.call(this).reverse() } }
+              if (!Array.prototype.toSpliced) { Array.prototype.toSpliced = function () { var a = Array.prototype.slice.call(this); a.splice.apply(a, [].slice.call(arguments)); return a } }
+              if (!Array.prototype.with) { Array.prototype.with = function (i, v) { var a = Array.prototype.slice.call(this); var j = i < 0 ? a.length + i : i; a[j] = v; return a } }
+              if (!Array.prototype.findLast) { Array.prototype.findLast = function (cb, t) { for (var i = this.length - 1; i >= 0; i--) { if (cb.call(t, this[i], i, this)) return this[i] } } }
+              if (!Array.prototype.findLastIndex) { Array.prototype.findLastIndex = function (cb, t) { for (var i = this.length - 1; i >= 0; i--) { if (cb.call(t, this[i], i, this)) return i } return -1 } }
+              if (!Array.prototype.at) { Array.prototype.at = function (i) { i = Math.trunc(i) || 0; if (i < 0) i += this.length; return (i >= 0 && i < this.length) ? this[i] : undefined } }
+              if (!String.prototype.at) { String.prototype.at = function (i) { i = Math.trunc(i) || 0; if (i < 0) i += this.length; return (i >= 0 && i < this.length) ? this[i] : undefined } }
+              if (typeof structuredClone !== "function") { window.structuredClone = function (o) { return JSON.parse(JSON.stringify(o)) } }
+              if (typeof crypto !== "undefined" && typeof crypto.randomUUID !== "function") { crypto.randomUUID = function () { var b = crypto.getRandomValues(new Uint8Array(16)); b[6] = b[6] & 15 | 64; b[8] = b[8] & 63 | 128; var h = []; for (var i = 0; i < 16; i++) { h.push(("0" + b[i].toString(16)).slice(-2)) } return h.slice(0, 4).join("") + "-" + h.slice(4, 6).join("") + "-" + h.slice(6, 8).join("") + "-" + h.slice(8, 10).join("") + "-" + h.slice(10).join("") } }
+            })();
+        """.trimIndent()
+
         /**
          * Синхронно сообщает версию из подвала, наличие экрана ошибки, контроллера SW
          * и текущий URL. Снятие регистрации SW и чистка CacheStorage запускаются
